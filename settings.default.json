@@ -1,0 +1,1538 @@
+{
+  "monsters": {
+    "거북궁사": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "건달바의혼": {
+      "squad_counts": [
+        1.0,
+        2.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 90.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "경문신장": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "공작원_다령": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "교룡궁": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "구지모사역술사": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "구지모시녀장": {
+      "squad_counts": [
+        3.5,
+        4.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 80.0,
+      "summon_mode": "non_taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "궁_교룡": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_대호": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_미후": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_사수": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_흉맥": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "귀_염우": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "귀_투적": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "기": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "누에": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "늪지이무기": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_각": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_귀": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_삼": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_성": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_여": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_저": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_필": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_허": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 50.0,
+      "summon_mode": "non_taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "두이": {
+      "squad_counts": [
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": true,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "루드라의혼": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "마후라가의혼": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "백면구미호": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "백안귀": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "벼락의 사령술사": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "center_move_delay": 2.0,
+      "lead_px": 50.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "복수자_샤오링": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "삼미호": {
+      "squad_counts": [
+        7.0,
+        7.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 80.0,
+      "summon_mode": "non_taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "석사자": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "수룡": {
+      "squad_counts": [
+        1.0,
+        2.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 100.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "신장_경문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "신장_사문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "신장_생문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "신장_휴문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "실험체발로": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "아디티": {
+      "squad_counts": [
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "악령_수령": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악령_염옥": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악령_전이": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악령_풍마": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "악몽귀": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악몽지기": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "암령의고주": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "암령의사육사": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "암령의시녀": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "암령의장로": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "연옥동자": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "염라대왕": {
+      "squad_counts": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center_move_delay": 2.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "오운_소": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "오운_염": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "오운_전": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "오운_태": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "욕수의사념": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "유물지도": {
+      "squad_counts": [
+        5.0,
+        6.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "유물지도(정예)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "잠식귀(뇌)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "잠식귀(수)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "summon_mode": "taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "잠식귀(풍)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "잠식귀(화)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "제사장_허독": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "지식의고룡": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "천옥_집행수": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "천옥_천망수": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "현진_장로": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    }
+  },
+  "gm_chat_msg": "",
+  "discord_webhook": "",
+  "discord_token": "",
+  "discord_channel": "",
+  "ntfy_url": "",
+  "notify_whisper": true,
+  "notify_normal": true,
+  "notify_repeat": false,
+  "sched_cycles": 3,
+  "sched_battles": 10,
+  "sched_rest_sec": 600,
+  "current_monster": "건달바의혼",
+  "banja_mode": false,
+  "win_w": 960,
+  "win_h": 660,
+  "auth_id": ""
+}

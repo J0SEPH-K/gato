@@ -1,0 +1,23 @@
+# Pinned to the versions shipped inside the original bundle
+# (source of truth: TalkFile_Gato_super5/_internal/*.dist-info, torch/version.py,
+#  pywin32_system32 DLL file-version 3.11.312.0). Target: Windows x64, Python 3.11.
+#
+# torch/torchvision are CPU builds and must come from the PyTorch CPU index:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+numpy==2.4.4
+opencv_python==5.0.0.93
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
+ultralytics==8.4.95
+pythonnet==3.1.0
+pywin32==312
+uiautomation==2.0.29
+pywebview==6.2.1
+scapy==2.7.0
+psutil==7.1.0
+comtypes==1.4.16
+clr_loader==0.3.1
+cryptography==49.0.0
+MarkupSafe==3.0.3
+windows_capture==2.0.1
+websockets==15.0.1

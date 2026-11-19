@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.bak*
+prism_settings.json
+.prism_settings_*.tmp
+battle_count.txt
+appear_records.txt
+gato_traceback.log
+debug/
+snapshots/
+dist/
+build/
+.venv/

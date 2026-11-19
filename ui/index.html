@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Gato_super</title>
+<style>
+  /* ============================================================
+     Gato_super — real desktop layout: sidebar (controls + status)
+     + content (log/chat), landscape, sized for a monitor, not a
+     phone. One hairline divider separates the two; everything
+     else reads from background-color steps, not borders. Every
+     control keeps its original id so pywebview.api.* needs zero
+     changes.
+     ============================================================ */
+  :root {
+    --bg: #121212;
+    --sidebar: #171717;
+    --panel: #1d1d1d;
+    --panel2: #242424;
+    --line: #2b2b2b;
+    --text: #efefef;
+    --dim: #9a9a9a;
+    --dim2: #6b6b6b;
+    --gold: #d8a72f;
+    --green: #4f9d6a;
+    --red: #c8492c;
+    --radius: 12px;
+    --ease: cubic-bezier(.22,.9,.3,1);
+  }
+  @font-face {
+    font-family: "Pretendard Variable";
+    src: url("fonts/PretendardVariable.woff2") format("woff2-variations");
+    font-weight: 45 920;
+    font-display: swap;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; min-width: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Pretendard Variable", "Malgun Gothic", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex; flex-direction: column;
+    height: 100vh; overflow: hidden;
+    font-size: 14px;
+  }
+  button {
+    font-family: inherit; cursor: pointer; border: none; color: var(--text);
+    background: var(--panel2); border-radius: 9px;
+    transition: background .15s var(--ease), transform .1s var(--ease), filter .15s var(--ease), opacity .15s;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:active { transform: scale(.97); }
+  input, select {
+    font-family: inherit; color: var(--text); background: #0f0f0f;
+    border: 1px solid var(--line); border-radius: 8px;
+    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(216,167,47,.15); }
+
+  /* ---------------------------- titlebar ---------------------------- */
+  .titlebar {
+    display: flex; align-items: center; justify-content: space-between;
+    flex: none; height: 42px; padding: 0 8px 0 16px;
+    -webkit-app-region: drag;
+  }
+  .titlebar .id { display: flex; align-items: center; gap: 9px; }
+  .titlebar .mark {
+    width: 20px; height: 20px; border-radius: 6px;
+    background: var(--gold); display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; color: #1a1408;
+  }
+  .titlebar h1 { font-size: 13.5px; font-weight: 600; color: var(--dim); }
+  .upd-chip {
+    -webkit-app-region: no-drag;
+    display: none; align-items: center; gap: 5px; margin-right: 6px;
+    padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: var(--gold); color: #1a1408;
+  }
+  .upd-chip.show { display: flex; animation: popIn .4s var(--ease); }
+  @keyframes popIn { from { transform: scale(.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .win-btns { display: flex; -webkit-app-region: no-drag; }
+  .win-btn {
+    width: 38px; height: 32px; background: transparent; border-radius: 6px;
+    color: var(--dim2); font-size: 12px;
+  }
+  .win-btn:hover { background: var(--panel2); color: var(--text); }
+  .win-btn.close:hover { background: var(--red); color: #fff; }
+
+  /* ---------------------------- main split ---------------------------- */
+  #main { flex: 1; min-height: 0; display: flex; }
+
+  /* ---------------------------- sidebar ---------------------------- */
+  #sidebar {
+    flex: 0 0 272px; background: var(--sidebar); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow-y: auto; padding: 24px 20px;
+  }
+  #sidebar::-webkit-scrollbar { width: 6px; }
+  #sidebar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+  #hero { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  #heroBtn {
+    position: relative; width: 124px; height: 124px; border-radius: 50%;
+    background: var(--panel); border: 2px solid rgba(216,167,47,.3);
+    display: grid; place-items: center; flex: none;
+    transition: border-color .4s var(--ease), background .4s var(--ease);
+  }
+  #heroBtn:hover { border-color: rgba(216,167,47,.55); }
+  #heroBtn:active { transform: scale(.97); }
+  #heroBtn .shape {
+    position: absolute; inset: 6px; border-radius: 50%;
+    background: var(--panel2);
+    transition: border-radius .5s var(--ease), background .3s var(--ease);
+  }
+  #heroBtn .glyph {
+    position: relative; font-size: 17px; font-weight: 600;
+    color: var(--gold); transition: color .3s var(--ease);
+  }
+  #heroBtn.idle .glyph { color: var(--gold); }
+  /* connecting: a quiet, precise shape-cycle (not a liquid blob) signals
+     "working" without decoration -- flat fill, no gradient, no glow */
+  #heroBtn.connecting { border-color: var(--gold); }
+  #heroBtn.connecting .shape {
+    background: var(--panel2); border: 1px solid rgba(216,167,47,.4);
+    animation: morph 3.2s steps(4, end) infinite;
+  }
+  #heroBtn.connecting .glyph { color: var(--gold); }
+  @keyframes morph {
+    0%   { border-radius: 50%; }
+    25%  { border-radius: 30%; }
+    50%  { border-radius: 50% 50% 20% 20% / 50% 50% 35% 35%; }
+    75%  { border-radius: 30%; }
+    100% { border-radius: 50%; }
+  }
+  #heroBtn.running { border-color: var(--green); }
+  #heroBtn.running .shape { background: var(--green); animation: pulse 2.4s ease-in-out infinite; }
+  #heroBtn.running .glyph { color: #0f1a13; }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.045); }
+  }
+  #heroMeta { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #battles { font-size: 38px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  #battles.pop { animation: numPop .4s var(--ease); }
+  @keyframes numPop { 30% { transform: scale(1.1); color: var(--gold); } }
+  #battlesLabel { font-size: 12.5px; color: var(--dim); }
+  #monsterRow {
+    display: flex; align-items: center; gap: 8px; margin-top: 4px;
+    padding: 5px 12px 5px 5px; border-radius: 10px; background: var(--panel);
+    cursor: pointer; transition: background .15s var(--ease);
+  }
+  #monsterRow:hover { background: var(--panel2); }
+  .portrait {
+    width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: none; background: #0c0c0c;
+  }
+  .portrait.none { display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--dim); background: var(--panel2); border: none; }
+  #monsterName { font-size: 12.5px; color: var(--dim); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------------------------- status list ---------------------------- */
+  #chips { flex: none; display: flex; flex-direction: column; gap: 3px; margin-top: 22px; }
+  .chip {
+    font-size: 12.5px; padding: 7px 9px; color: var(--dim);
+    background: var(--panel);
+    border-radius: 7px;
+    transition: color .25s var(--ease), background .25s var(--ease);
+    display: flex; align-items: center; gap: 9px; white-space: nowrap;
+  }
+  .chip .d { width: 6px; height: 6px; border-radius: 50%; background: var(--dim2); flex: none; }
+  .chip.on { color: #8fdca7; background: rgba(79,157,106,.1); }
+  .chip.on .d { background: var(--green); box-shadow: 0 0 6px rgba(79,157,106,.7); }
+  .chip.warn { color: #f0b09a; background: rgba(200,73,44,.1); }
+  .chip.warn .d { background: var(--red); }
+  #triggers { flex: none; font-size: 12.5px; color: var(--gold); padding: 4px 2px 0; }
+
+  /* ---------------------------- sidebar nav (records/kill/sched/settings) ---------------------------- */
+  #actions { flex: none; display: flex; flex-direction: column; gap: 3px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .actbtn {
+    display: flex; align-items: center;
+    height: 38px; padding: 0 11px; background: var(--panel); font-size: 13px; color: var(--dim);
+    border-radius: 7px; text-align: left; justify-content: flex-start;
+  }
+  .actbtn:hover { color: var(--text); background: var(--panel2); }
+
+  #sidebar-spacer { flex: 1; min-height: 12px; }
+
+  /* ---------------------------- content ---------------------------- */
+  #content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #ovBar {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px 0; font-size: 12.5px; color: var(--dim);
+  }
+  #ovBar b { color: var(--text); font-weight: 600; }
+  #notice {
+    flex: none; margin: 16px 20px 0; padding: 11px 14px; border-radius: 10px;
+    background: rgba(216,167,47,.09); border: 1px solid rgba(216,167,47,.3);
+    color: var(--gold); font-size: 13px; line-height: 1.5; display: none;
+  }
+
+  /* ---------------------------- schedule (expands in place) ---------------------------- */
+  #schedWrap { flex: none; padding: 16px 20px 0; overflow: hidden; max-height: 0; transition: max-height .35s var(--ease); }
+  #schedWrap.open { max-height: 140px; }
+  #schedBox { background: var(--panel); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .sched-row { display: flex; gap: 10px; align-items: flex-end; }
+  .sched-row label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--dim); flex: 1; }
+  .sched-row input { height: 34px; padding: 0 10px; font-size: 13px; width: 100%; }
+  #btnSched.round { flex: none; align-self: stretch; padding: 0 14px; font-size: 12.5px; white-space: nowrap; background: var(--gold); color: #1a1408; font-weight: 600; }
+  #btnReset.round { background: transparent; color: var(--dim2); font-weight: 400; }
+  #btnReset.round:hover { color: var(--dim); background: var(--panel2); }
+  #schedBox.on { background: rgba(200,73,44,.08); }
+  #schedBox.on #btnSched { background: var(--red); color: #fff; }
+  #schStatus { font-size: 12px; color: var(--gold); min-height: 15px; }
+
+  /* ---------------------------- log / chat tabs ---------------------------- */
+  #logSection { flex: 1; min-height: 160px; display: flex; flex-direction: column; padding: 16px 20px 18px; }
+  #logTabs { flex: none; display: flex; gap: 4px; margin-bottom: 10px; background: var(--panel); padding: 3px; border-radius: 9px; width: fit-content; }
+  #logTabs button { flex: none; width: 110px; height: 30px; font-size: 12.5px; background: transparent; color: var(--dim); border-radius: 7px; }
+  #logTabs button.on { background: var(--panel2); color: var(--text); }
+  .logbox { flex: 1; min-height: 0; overflow-y: auto; background: #0e0e0e; border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.8; color: #bdbdbd; font-variant-numeric: tabular-nums; }
+  .logbox.is-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .logbox .empty { text-align: center; line-height: 1.6; }
+  .logbox .empty-sub { color: var(--dim2); font-size: 11.5px; }
+  .logbox::-webkit-scrollbar { width: 6px; }
+  .logbox::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  .logbox > div { animation: lineIn .2s var(--ease) both; }
+  @keyframes lineIn { from { opacity: 0; transform: translateY(3px); } }
+  #log, #chatlog { display: none; }
+  #log.on, #chatlog.on { display: block; }
+  #log.on.is-empty, #chatlog.on.is-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .t { color: #5a5a5a; margin-right: 8px; }
+  .k-trigger { color: var(--gold); } .k-scene { color: #8fb8dc; }
+  .k-clear { color: var(--dim2); } .k-whisper { color: var(--green); }
+  .k-input { color: var(--gold); }
+  .empty { color: var(--dim2); }
+  .c-name { color: #d6d6d6; margin-right: 6px; font-weight: 600; }
+  .c-kind { margin-right: 6px; font-size: 11px; }
+  .c-일반 .c-kind { color: #6ea8ff; }
+  .c-반복 { color: var(--dim2); } .c-반복 .c-kind { color: var(--dim2); }
+  .c-귓말 { color: #ffd787; } .c-귓말 .c-kind { color: var(--gold); }
+
+  /* ---------------------------- footer ---------------------------- */
+  footer { flex: none; display: flex; justify-content: space-between; padding: 10px 20px; font-size: 11.5px; color: var(--dim2); border-top: 1px solid var(--line); }
+  #adminState.no { color: var(--red); }
+
+  /* ---------------------------- drawer (settings) ---------------------------- */
+  .scrim {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 25;
+    opacity: 0; visibility: hidden; transition: opacity .25s var(--ease), visibility 0s linear .25s;
+  }
+  .scrim.show { opacity: 1; visibility: visible; transition: opacity .25s var(--ease); }
+  #settings {
+    position: fixed; inset: 0 0 0 auto; width: min(440px, 92vw); z-index: 26;
+    background: var(--bg); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    transform: translateX(100%); transition: transform .3s var(--ease);
+  }
+  #settings.show { transform: translateX(0); }
+  .drawer-head {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 20px; border-bottom: 1px solid var(--line);
+  }
+  .drawer-head h2 { font-size: 15px; font-weight: 600; }
+  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 18px; }
+  .drawer-body::-webkit-scrollbar { width: 6px; }
+  .drawer-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+  #setTabs { flex: none; display: flex; gap: 4px; padding: 0 20px; background: var(--bg); }
+  #setTabs button { flex: 1; height: 34px; font-size: 12.5px; background: transparent; color: var(--dim); border-radius: 0; border-bottom: 2px solid transparent; }
+  #setTabs button.on { color: var(--gold); border-bottom-color: var(--gold); }
+  .setpane { display: none; }
+  .setpane.on { display: flex; flex-direction: column; gap: 18px; animation: fadeUp .22s var(--ease); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(5px); } }
+
+  .frow { display: flex; align-items: center; gap: 10px; }
+  .flabel { font-size: 12.5px; color: var(--dim); flex: 0 0 68px; }
+  .mtext, select.mtext { flex: 1; min-width: 0; height: 36px; padding: 0 12px; font-size: 13px; }
+  .tbtn { flex: none; height: 36px; padding: 0 14px; font-size: 12.5px; background: var(--panel2); }
+  .savemsg { font-size: 12px; color: var(--green); min-height: 15px; }
+  .fsection { font-size: 12px; color: var(--gold); padding-bottom: 6px; border-bottom: 1px solid var(--line); margin-top: 4px; }
+  .mgrid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+  .mgrid.two { grid-template-columns: repeat(2,1fr); }
+  .mgrid label { font-size: 12px; color: var(--dim); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .mgrid input[type=number] { width: 100%; height: 32px; text-align: center; font-variant-numeric: tabular-nums; }
+  .mcheck { cursor: pointer; }
+  .keyrow { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* field cards: each settings section is a real grouped unit, not a
+     flat list of label-left rows -- label sits ABOVE its input, inputs
+     size to what they actually hold instead of all stretching full width */
+  .scard { background: var(--panel); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .scard-title { font-size: 12px; color: var(--gold); font-weight: 600; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field .lbl { font-size: 11.5px; color: var(--dim); }
+  .field-row { display: flex; gap: 8px; align-items: stretch; }
+  .field-row .mtext { flex: 1; }
+  .field.narrow { width: 140px; }
+  .fields-two { display: flex; gap: 10px; }
+  .fields-two .field { flex: 1; }
+  .keybtn { flex: 1 1 0; min-width: 32px; height: 34px; font-size: 13px; background: var(--panel); color: var(--dim); font-variant-numeric: tabular-nums; }
+  .keybtn.on { background: var(--gold); color: #1a1408; font-weight: 600; }
+  .mportrait { width: 46px; height: 46px; border-radius: 10px; object-fit: cover; background: #0c0c0c; flex: none; }
+  .drawer-foot { flex: none; display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); }
+  .drawer-foot button { flex: 1; height: 42px; font-size: 13.5px; }
+  .drawer-foot .save { background: var(--green); color: #eafff0; font-weight: 600; }
+
+  /* ---------------------------- generic modal (records / kill rank) ---------------------------- */
+  .modal-back {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 27;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .18s var(--ease), visibility 0s linear .18s;
+  }
+  .modal-back.show { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .18s var(--ease); }
+  .modal {
+    width: 420px; max-width: calc(100vw - 48px); max-height: calc(100vh - 64px);
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    display: flex; flex-direction: column; box-shadow: 0 16px 48px rgba(0,0,0,.5);
+    transform: translateY(8px) scale(.97); transition: transform .22s var(--ease);
+  }
+  .modal-back.show .modal { transform: none; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .modal-head h2 { font-size: 14px; font-weight: 600; }
+  .modal-body { padding: 14px 18px; overflow-y: auto; }
+  .modal-body::-webkit-scrollbar { width: 6px; }
+  .modal-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  .mbtns { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+  .mbtns button { flex: 1; height: 38px; font-size: 13px; }
+
+  .reclist { display: flex; flex-direction: column; gap: 4px; }
+  .rec-row { display: grid; grid-template-columns: 1fr auto 60px 60px; gap: 8px; padding: 9px 11px; border-radius: 8px; background: var(--panel2); font-size: 12.5px; font-variant-numeric: tabular-nums; align-items: center; }
+  .rec-row .rt { color: var(--dim); } .rec-row .rk { color: var(--gold); font-weight: 600; }
+  .rec-row .rc { text-align: right; } .rec-row .rd { text-align: right; color: var(--dim); }
+  .rec-row.warn { background: rgba(200,74,46,.14); }
+  .rec-row.warn .rc, .rec-row.warn .rd { color: var(--red); font-weight: 600; }
+  .rec-empty { color: var(--dim2); text-align: center; padding: 24px; font-size: 13px; }
+  .kill-note { font-size: 12px; color: var(--dim); margin-bottom: 12px; line-height: 1.6; }
+  .kill-list { max-height: 320px; overflow-y: auto; }
+  .kill-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+  .kill-rank { flex: none; width: 18px; text-align: center; color: var(--dim); font-size: 11px; }
+  .kill-name { flex: none; width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kill-bar { flex: 1; height: 6px; background: #0c0c0c; border-radius: 3px; overflow: hidden; }
+  .kill-bar i { display: block; height: 100%; background: var(--gold); border-radius: 3px; }
+  .kill-tier { flex: none; font-size: 10px; color: var(--dim); background: #0c0c0c; border-radius: 4px; padding: 2px 5px; }
+  .kill-pct { flex: none; width: 44px; text-align: right; color: var(--gold); font-weight: 600; }
+  .kill-row:first-child .kill-name { color: var(--gold); }
+
+  /* ---------------------------- toasts ---------------------------- */
+  #toasts { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; z-index: 50; pointer-events: none; max-width: calc(100vw - 48px); }
+  .toast {
+    background: #262626; border: 1px solid var(--line); color: var(--text);
+    border-radius: 9px; padding: 10px 15px; font-size: 13px; line-height: 1.4;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+    opacity: 0; transform: translateY(6px) scale(.97); transition: opacity .22s var(--ease), transform .22s var(--ease);
+  }
+  .toast.in { opacity: 1; transform: none; }
+  .toast.ok { border-color: rgba(79,157,106,.4); color: #b9e8c8; }
+  .toast.err { border-color: rgba(200,73,44,.4); color: #f0b09a; }
+
+  /* ---------------------------- resize grips ---------------------------- */
+  .rz { position: fixed; z-index: 40; touch-action: none; }
+  .rz-e { top: 0; right: 0; width: 5px; height: 100%; cursor: ew-resize; }
+  .rz-s { left: 0; bottom: 0; width: 100%; height: 5px; cursor: ns-resize; }
+  .rz-se { right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+  .rz-se:hover { background: linear-gradient(135deg, transparent 60%, var(--line) 60%, var(--line) 70%, transparent 70%); }
+</style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="id">
+      <span class="mark">超</span>
+      <h1>Gato_super</h1>
+      <span id="runDot" style="display:none"></span>
+      <span id="sFps" style="display:none"></span>
+      <span id="sRes" style="display:none"></span>
+      <span id="clientStates" style="display:none"></span>
+      <span id="chatSub" style="display:none"></span>
+    </div>
+    <div class="win-btns">
+      <span class="upd-chip" id="btnUpdate">업데이트</span>
+      <button class="win-btn" id="btnMin" title="최소화">─</button>
+      <button class="win-btn close" id="btnWinClose" title="닫기">✕</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <aside id="sidebar">
+      <section id="hero">
+        <button id="heroBtn" class="idle">
+          <div class="shape"></div>
+          <span class="glyph" id="heroGlyph">시작</span>
+        </button>
+        <div id="heroMeta">
+          <div id="battles" data-v="0">0</div>
+          <div id="battlesLabel">전투 횟수</div>
+          <div id="monsterRow">
+            <div class="portrait none" id="portrait">?</div>
+            <span id="monsterName">몹 미설정</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="chips">
+        <span id="auth" class="chip"><span class="d"></span><span class="t">인증 확인 중…</span></span>
+        <span id="scene" class="chip"><span class="d"></span><span class="t">화면 –</span></span>
+        <span id="conn" class="chip"><span class="d"></span><span class="t">정지</span></span>
+        <span id="gato" class="chip"><span class="d"></span><span class="t">고트 –</span></span>
+      </section>
+      <div id="triggers" style="display:none"></div>
+
+      <nav id="actions">
+        <button class="actbtn" id="btnRecords">기록</button>
+        <button class="actbtn" id="btnKill">결정타</button>
+        <button class="actbtn" id="btnSchedToggle">스케쥴</button>
+        <button class="actbtn" id="btnGear">설정</button>
+      </nav>
+
+      <div id="sidebar-spacer"></div>
+    </aside>
+
+    <section id="content">
+      <div id="ovBar"><span id="ovHint">좌측 원형 버튼을 눌러 매크로를 시작하세요</span><span id="ovFps"></span></div>
+      <div id="notice"></div>
+
+      <div id="schedWrap">
+        <div class="sched-row" style="margin-bottom:10px">
+          <label>사이클<input id="schCycles" type="number" min="1" value="3"></label>
+          <label>전투/회<input id="schBattles" type="number" min="1" value="10"></label>
+          <label>휴식(분)<input id="schRest" type="number" min="0" step="0.5" value="10"></label>
+        </div>
+        <div id="schedBox">
+          <div class="sched-row">
+            <button id="btnSched" class="round" style="flex:1">스케쥴 시작</button>
+            <button id="btnReset" class="round" style="flex:none;padding:0 14px">전투 초기화</button>
+          </div>
+          <div id="schStatus"></div>
+        </div>
+      </div>
+
+      <section id="logSection">
+        <div id="logTabs">
+          <button data-log="log" class="on">인식 · 입력</button>
+          <button data-log="chatlog">채팅</button>
+        </div>
+        <div id="log" class="logbox on is-empty"><div class="empty">인식/입력 이벤트가 여기에 표시됩니다<div class="empty-sub">매크로를 시작하면 자동으로 기록됩니다</div></div></div>
+        <div id="chatlog" class="logbox is-empty"><div class="empty">채팅이 여기에 표시됩니다<div class="empty-sub">게임 채팅을 자동으로 수신합니다</div></div></div>
+      </section>
+
+      <footer>
+        <span id="winState">gersang.exe 탐색 전</span>
+        <span id="adminState">권한 –</span>
+      </footer>
+    </section>
+  </div>
+
+  <!-- settings drawer -->
+  <div class="scrim" id="scrim"></div>
+  <div id="settings">
+    <div class="drawer-head"><h2>설정</h2><button class="win-btn" id="btnClose">✕</button></div>
+    <nav id="setTabs">
+      <button data-set="auth" class="on">인증</button>
+      <button data-set="mob">몹 · 전투</button>
+      <button data-set="notify">알림 · 원격</button>
+    </nav>
+    <div class="drawer-body">
+      <div class="setpane on" id="pane-auth">
+        <div class="scard">
+          <div class="scard-title">서버 인증</div>
+          <div class="field-row">
+            <div class="field" style="flex:1"><span class="lbl">서버 등록 ID</span><input id="authId" type="text" class="mtext" placeholder="ID 입력" onkeydown="if(event.key==='Enter')doLogin()"></div>
+            <button id="btnLogin" class="tbtn" style="align-self:flex-end">로그인</button>
+          </div>
+          <button id="btnLogout" class="tbtn" style="align-self:flex-start">로그아웃</button>
+          <div class="savemsg" id="authMsg"></div>
+          <div id="banjaRow" style="display:none">
+            <label class="mcheck" style="font-size:12.5px;display:flex;align-items:center;gap:7px"><input type="checkbox" id="banjaMode"> 반자사</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="setpane" id="pane-mob">
+        <div class="scard">
+          <div class="scard-title">몹 선택</div>
+          <div class="fields-two">
+            <div class="field"><span class="lbl">카테고리</span><select id="catSelect" class="mtext"></select></div>
+            <div class="field" style="flex:2"><span class="lbl">몹</span>
+              <div class="field-row">
+                <img id="mPortrait" class="mportrait" style="display:none" alt="">
+                <select id="mobSelect" class="mtext"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="scard">
+          <div class="scard-title">R 홀드 시간 (부대별, 초)</div>
+          <div class="mgrid" id="squadInputs"></div>
+        </div>
+
+        <div class="scard">
+          <div class="scard-title">전투 설정</div>
+          <div class="fields-two">
+            <div class="field narrow"><span class="lbl">중앙이동(초)</span><input id="centerDelay" type="number" min="0" max="10" step="0.1"></div>
+            <div class="field narrow"><span class="lbl">lead(px)</span><input id="leadPx" type="number" min="0" max="300" step="5"></div>
+          </div>
+          <div class="field"><span class="lbl">소환</span>
+            <select id="summonMode" class="mtext">
+              <option value="none">소환 사용 안 함</option>
+              <option value="taunt">도발 탱 소환</option>
+              <option value="non_taunt">비도발 탱 소환</option>
+            </select>
+          </div>
+          <div class="mgrid two">
+            <label class="mcheck"><input type="checkbox" id="multiRetreat"> 다부대 퇴각(4↑)</label>
+            <label class="mcheck"><input type="checkbox" id="noejeonju"> 뇌전주(0 + R)</label>
+          </div>
+        </div>
+
+        <div class="scard">
+          <div class="scard-title">사용 격수</div>
+          <div class="keyrow" id="attackKeys"></div>
+        </div>
+      </div>
+
+      <div class="setpane" id="pane-notify">
+        <div class="scard">
+          <div class="scard-title">공통 알림</div>
+          <div class="field narrow"><span class="lbl">영자응답</span><input id="gmMsg" type="text" class="mtext" placeholder="빈칸=응답 안 함"></div>
+          <div class="field-row"><div class="field" style="flex:1"><span class="lbl">디스코드 웹훅</span><input id="webhook" type="text" class="mtext" placeholder="웹훅 URL"></div><button id="btnTestWebhook" class="tbtn" style="align-self:flex-end">테스트</button></div>
+          <div class="field-row"><div class="field" style="flex:1"><span class="lbl">ntfy 토픽</span><input id="ntfy" type="text" class="mtext" placeholder="토픽명"></div><button id="btnTestNtfy" class="tbtn" style="align-self:flex-end">테스트</button></div>
+        </div>
+
+        <div class="scard">
+          <div class="scard-title">원격 명령 (디스코드 봇)</div>
+          <div class="field"><span class="lbl">봇 토큰</span><input id="dcToken" type="password" class="mtext" placeholder="Message Content Intent 필요"></div>
+          <div class="field narrow"><span class="lbl">채널 ID</span><input id="dcChannel" type="text" class="mtext"></div>
+        </div>
+
+        <div class="scard">
+          <div class="scard-title">채팅 알림 포워딩</div>
+          <div class="mgrid">
+            <label class="mcheck"><input type="checkbox" id="nWhisper"> 귓말</label>
+            <label class="mcheck"><input type="checkbox" id="nNormal"> 일반챗</label>
+            <label class="mcheck"><input type="checkbox" id="nRepeat"> 반복챗</label>
+          </div>
+        </div>
+      </div>
+      <div class="savemsg" id="saveMsg"></div>
+    </div>
+    <div class="drawer-foot">
+      <button id="btnCancel">닫기</button>
+      <button class="save" id="btnSave">저장</button>
+    </div>
+  </div>
+
+  <!-- records modal -->
+  <div id="records" class="modal-back">
+    <div class="modal">
+      <div class="modal-head"><h2>조철 · 자방문 출현 기록</h2><button class="win-btn" id="btnRecClose">✕</button></div>
+      <div class="modal-body"><div class="reclist" id="recList"></div></div>
+      <div class="mbtns"><button id="btnRecOk">닫기</button></div>
+    </div>
+  </div>
+
+  <!-- kill rank modal -->
+  <div id="killRank" class="modal-back">
+    <div class="modal">
+      <div class="modal-head"><h2>결정타 랭킹</h2><button class="win-btn" id="btnKillClose">✕</button></div>
+      <div class="modal-body">
+        <div class="kill-note">세션 누적 결정타 지분 — 참여 경험치를 뺀 초과분(킬 기여) 기준.<br>본캐 추가 경험치와 단군의 거울 등은 고려하지 않는 집계입니다.</div>
+        <div id="killList" class="kill-list"><div class="rec-empty">아직 집계된 전투 없음</div></div>
+      </div>
+      <div class="mbtns"><button id="btnKillOk">닫기</button></div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+  <div class="rz rz-e" data-rz="e"></div>
+  <div class="rz rz-s" data-rz="s"></div>
+  <div class="rz rz-se" data-rz="se"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let running = false, curMonster = null, schedActive = false, waitingForWindow = false;
+  let updNotified = '';
+
+  function toast(msg, type = '') {
+    const d = document.createElement('div');
+    d.className = 'toast' + (type ? ' ' + type : '');
+    d.textContent = msg;
+    $('toasts').appendChild(d);
+    requestAnimationFrame(() => d.classList.add('in'));
+    setTimeout(() => { d.classList.remove('in'); setTimeout(() => d.remove(), 250); }, 2600);
+  }
+
+  // ---- window resize (frameless -- no OS border, grips drive it directly) ----
+  function initResize() {
+    let mode = null, sx = 0, sy = 0, sw = 0, sh = 0, pend = null, raf = 0, last = null;
+    const MIN_W = 720, MIN_H = 560;
+    const flush = () => {
+      raf = 0;
+      if (!pend) return;
+      last = pend; pend = null;
+      try { pywebview.api.win_resize(last[0], last[1]); } catch (e) {}
+    };
+    for (const el of document.querySelectorAll('.rz')) {
+      el.addEventListener('pointerdown', e => {
+        mode = el.dataset.rz;
+        sx = e.screenX; sy = e.screenY;
+        sw = window.innerWidth; sh = window.innerHeight;
+        last = [sw, sh];
+        el.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+      el.addEventListener('pointermove', e => {
+        if (!mode) return;
+        const w = mode.includes('e') ? Math.max(MIN_W, sw + (e.screenX - sx)) : sw;
+        const h = mode.includes('s') ? Math.max(MIN_H, sh + (e.screenY - sy)) : sh;
+        pend = [w, h];
+        if (!raf) raf = requestAnimationFrame(flush);
+      });
+      const end = e => {
+        if (!mode) return;
+        mode = null;
+        try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+        flush();
+        if (last) { try { pywebview.api.win_size_save(last[0], last[1]); } catch (_) {} }
+      };
+      el.addEventListener('pointerup', end);
+      el.addEventListener('pointercancel', end);
+    }
+  }
+
+  // ---- battle count-up ----
+  let battleAnim = null;
+  function setBattles(to) {
+    const el = $('battles');
+    const from = parseInt(el.dataset.v || '0', 10);
+    if (from === to) return;
+    el.dataset.v = to;
+    if (battleAnim) cancelAnimationFrame(battleAnim);
+    const t0 = performance.now(), dur = 500;
+    const step = t => {
+      const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(from + (to - from) * e).toLocaleString();
+      if (p < 1) battleAnim = requestAnimationFrame(step);
+    };
+    battleAnim = requestAnimationFrame(step);
+    el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+  }
+
+  function setChip(id, on, text, warn) {
+    const c = $(id);
+    c.classList.toggle('on', !!on);
+    c.classList.toggle('warn', !!warn);
+    c.querySelector('.t').textContent = text;
+  }
+
+  function setStatus(s) {
+    running = s.running;
+    waitingForWindow = running && !s.window_found;
+    const hb = $('heroBtn');
+    hb.classList.remove('idle', 'connecting', 'running');
+    hb.classList.add(running ? (s.window_found ? 'running' : 'connecting') : 'idle');
+    $('heroGlyph').textContent = running ? (s.window_found ? '종료' : '연결 중') : '시작';
+    $('runDot').classList.toggle('on', running);
+
+    setChip('conn', running && s.window_found, running ? (s.window_found ? '가동 중' : '창 대기') : '정지');
+    setChip('gato', s.gato, s.gato ? '고트 연동' : '고트 없음');
+
+    if (s.monster && curMonster !== null && s.monster !== curMonster) {
+      curMonster = s.monster;
+      refreshMainPortrait();
+      toast('몹 변경됨 — ' + s.monster);
+    }
+
+    const up = s.update || {};
+    const ub = $('btnUpdate');
+    ub.classList.toggle('show', !!up.available);
+    if (up.available) {
+      ub.title = `새 버전 ${up.latest} (현재 ${up.current}) — 클릭하면 자동 업데이트`;
+      if (up.latest && updNotified !== up.latest) {
+        updNotified = up.latest;
+        toast(`새 버전 ${up.latest} 발견 — 우측 상단 업데이트 버튼을 눌러주세요`, 'ok');
+      }
+    }
+    $('sFps').textContent = running ? (s.fps || 0).toFixed(1) : '–';
+    $('sRes').textContent = s.width ? s.width + '×' + s.height : '–';
+    $('ovHint').textContent = running
+      ? (s.window_found ? (curMonster || '몹 미설정') + ' 사냥 중' : '게임 창을 찾는 중…')
+      : '좌측 원형 버튼을 눌러 매크로를 시작하세요';
+    $('ovFps').textContent = running && s.window_found ? (s.fps || 0).toFixed(1) + ' fps · ' + (s.width||0) + '×' + (s.height||0) : '';
+    if (s.battle_count != null) setBattles(s.battle_count);
+
+    const v = s.vision || {};
+    setChip('scene', running && v.scene === 'main', '화면 ' + (running ? (v.scene_label || '–') : '–'));
+    const tr = $('triggers');
+    const trigs = running ? (v.triggers || []) : [];
+    let trHtml = '';
+    if (trigs.length || (running && v.whisper)) {
+      const parts = trigs.slice();
+      if (v.whisper) parts.push('귓말창');
+      trHtml = parts.join(' · ');
+    }
+    tr.style.display = trHtml ? '' : 'none';
+    tr.textContent = trHtml;
+
+    $('winState').textContent = s.window_found
+      ? ('gersang.exe 감지됨' + (s.window_count > 1 ? ' ×' + s.window_count : ''))
+      : 'gersang.exe 창 없음';
+    const cs = $('clientStates');
+    if (s.clients && s.clients.length) {
+      const col = st => st === '전투' ? 'var(--gold)'
+                      : st === '메인화면' ? 'var(--green)'
+                      : st === '판독불가' ? 'var(--red)' : 'var(--dim)';
+      const html = s.clients.map(c =>
+        `<b>${c.role}</b> <span style="color:${col(c.state)}">${c.state}</span>`
+      ).join(' · ');
+      if (cs.innerHTML !== html) cs.innerHTML = html;
+    }
+    const a = $('adminState');
+    a.textContent = s.admin ? '관리자 권한' : '권한 없음 — 입력 차단';
+    a.className = s.admin ? '' : 'no';
+
+    const au = s.auth || {};
+    setChip('auth', au.ok, au.label || '미인증');
+    const nt = $('notice');
+    if (au.notice) { nt.textContent = au.notice; nt.style.display = ''; }
+    else nt.style.display = 'none';
+
+    const sch = s.schedule || {};
+    schedActive = !!sch.active;
+    $('schedBox').classList.toggle('on', schedActive);
+    $('btnSched').textContent = schedActive ? '스케쥴 정지' : '스케쥴 시작';
+    ['schCycles', 'schBattles', 'schRest'].forEach(id => $(id).disabled = schedActive);
+    const sm = $('schStatus');
+    if (schedActive) {
+      if (sch.resting) {
+        const mm = Math.floor(sch.rest_left / 60), ss = sch.rest_left % 60;
+        sm.textContent = `사이클 ${sch.cycle}/${sch.cycles} · 휴식 ${mm}:${String(ss).padStart(2, '0')}`;
+      } else {
+        sm.textContent = `사이클 ${sch.cycle}/${sch.cycles} · 전투 ${sch.battles}/${sch.target}`;
+      }
+    } else sm.textContent = '';
+  }
+
+  async function doLogin() {
+    const m = $('authMsg'); m.textContent = '로그인 중…';
+    try {
+      const au = await pywebview.api.login($('authId').value);
+      m.textContent = au.label || '';
+      m.style.color = au.ok ? 'var(--green)' : 'var(--red)';
+      toast(au.ok ? '로그인 성공 — ' + (au.label || '') : '로그인 실패 — ' + (au.label || ''), au.ok ? 'ok' : 'err');
+    } catch (e) { m.textContent = '오류'; }
+    poll();
+  }
+  async function doLogout() {
+    try { const au = await pywebview.api.logout(); $('authMsg').textContent = au.label || ''; } catch (e) {}
+    poll();
+  }
+  window.doLogin = doLogin;
+
+  async function poll() { try { setStatus(await pywebview.api.status()); } catch (e) {} }
+
+  async function pollAll() {
+    try {
+      const r = await pywebview.api.tick(lastSeq, lastChatSeq);
+      if (!r) return;
+      setStatus(r.status);
+      renderEvents(r.events);
+      renderChat(r.chat);
+    } catch (e) {}
+  }
+
+  let lastSeq = 0, logEmpty = true;
+  function renderEvents(evs) {
+    try {
+      if (!evs || !evs.length) return;
+      const box = $('log');
+      if (logEmpty) { box.innerHTML = ''; box.classList.remove('is-empty'); logEmpty = false; }
+      for (const e of evs) {
+        lastSeq = Math.max(lastSeq, e.seq);
+        const d = document.createElement('div');
+        const t = document.createElement('span'); t.className = 't'; t.textContent = e.time;
+        const k = document.createElement('span'); k.className = 'k-' + e.kind; k.textContent = e.text;
+        d.append(t, k); box.appendChild(d);
+      }
+      while (box.childElementCount > 300) box.removeChild(box.firstChild);
+      box.scrollTop = box.scrollHeight;
+    } catch (e) {}
+  }
+
+  let lastChatSeq = 0, chatEmpty = true;
+  function renderChat(msgs) {
+    try {
+      if (!msgs || !msgs.length) return;
+      const box = $('chatlog');
+      if (chatEmpty) { box.innerHTML = ''; box.classList.remove('is-empty'); chatEmpty = false; }
+      for (const m of msgs) {
+        lastChatSeq = Math.max(lastChatSeq, m.seq);
+        const d = document.createElement('div'); d.className = 'c-' + m.kind;
+        const t = document.createElement('span'); t.className = 't'; t.textContent = m.time;
+        const k = document.createElement('span'); k.className = 'c-kind'; k.textContent = '[' + m.kind + ']';
+        const n = document.createElement('span'); n.className = 'c-name'; n.textContent = m.name;
+        const g = document.createElement('span'); g.textContent = m.msg;
+        d.append(t, k, n, g); box.appendChild(d);
+      }
+      while (box.childElementCount > 300) box.removeChild(box.firstChild);
+      box.scrollTop = box.scrollHeight;
+    } catch (e) {}
+  }
+
+  async function loadPortrait(name, imgEl, noneEl) {
+    try {
+      const url = await pywebview.api.portrait(name);
+      if (url) { imgEl.src = url; imgEl.style.display = ''; if (noneEl) noneEl.style.display = 'none'; return true; }
+    } catch (e) {}
+    return false;
+  }
+
+  async function loadSchedParams() {
+    try {
+      const c = await pywebview.api.get_config();
+      if (c.sched_cycles != null) $('schCycles').value = c.sched_cycles;
+      if (c.sched_battles != null) $('schBattles').value = c.sched_battles;
+      if (c.sched_rest_sec != null) $('schRest').value = c.sched_rest_sec / 60;
+    } catch (e) {}
+  }
+
+  async function refreshMainPortrait() {
+    const box = $('portrait');
+    try {
+      const cfg = await pywebview.api.get_config();
+      curMonster = cfg.current_monster;
+      $('monsterName').textContent = curMonster || '몹 미설정';
+      const url = await pywebview.api.portrait(curMonster);
+      if (url) {
+        box.outerHTML = '<img class="portrait" id="portrait" src="' + url + '" title="' + curMonster + '" alt="">';
+      } else {
+        const glyph = curMonster ? curMonster.charAt(0) : '?';
+        box.outerHTML = '<div class="portrait none" id="portrait" title="' + (curMonster||'') + '">' + glyph + '</div>';
+      }
+    } catch (e) {}
+  }
+
+  // ---- settings drawer ----
+  let cfg = null;
+  function readSummonMode(mc) {
+    return ['none', 'taunt', 'non_taunt'].includes(mc.summon_mode)
+      ? mc.summon_mode : (mc.use_summon === true ? 'taunt' : 'none');
+  }
+  function buildSquad() {
+    const box = $('squadInputs'); box.innerHTML = '';
+    for (let i = 1; i <= 6; i++) {
+      const l = document.createElement('label');
+      l.innerHTML = i + '부 <input type="number" step="0.1" min="0" max="10" id="squad' + i + '">';
+      box.appendChild(l);
+    }
+  }
+  async function loadMobFields(name) {
+    const mc = (cfg.monsters || {})[name] || {};
+    const sq = mc.squad_counts || [2,2,2,2,2,2];
+    for (let i = 1; i <= 6; i++) $('squad' + i).value = sq[i-1] ?? 2;
+    $('centerDelay').value = mc.center_move_delay ?? 1.0;
+    $('leadPx').value = mc.lead_px ?? 80;
+    $('summonMode').value = readSummonMode(mc);
+    $('multiRetreat').checked = !!mc.multi_retreat;
+    $('noejeonju').checked = !!mc.noejeonju;
+    setAttackKeys(mc.attack_keys);
+    const img = $('mPortrait'); img.style.display = 'none';
+    await loadPortrait(name, img, null);
+  }
+
+  const ATTACK_ALL = ['3','4','5','6','7','8','9'];
+  const ATTACK_DEFAULT = ['3','4','5','6'];
+  function buildAttackKeys() {
+    const box = $('attackKeys'); box.innerHTML = '';
+    for (const k of ATTACK_ALL) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'keybtn'; b.textContent = k;
+      b.dataset.key = k;
+      b.onclick = () => b.classList.toggle('on');
+      box.appendChild(b);
+    }
+  }
+  function setAttackKeys(list) {
+    const on = new Set((Array.isArray(list) ? list : ATTACK_DEFAULT).map(String));
+    for (const b of $('attackKeys').children) b.classList.toggle('on', on.has(b.dataset.key));
+  }
+  function getAttackKeys() {
+    return ATTACK_ALL.filter(k => {
+      const b = [...$('attackKeys').children].find(x => x.dataset.key === k);
+      return b && b.classList.contains('on');
+    });
+  }
+  function fillMobSelect(cat) {
+    const sel = $('mobSelect'); sel.innerHTML = '';
+    const mc = cfg.mob_category || {};
+    for (const n of (cfg.catalog || [])) {
+      if ((mc[n] || '기타') !== cat) continue;
+      const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o);
+    }
+  }
+  function switchSetTab(name) {
+    for (const b of document.querySelectorAll('#setTabs button')) b.classList.toggle('on', b.dataset.set === name);
+    for (const p of document.querySelectorAll('.setpane')) p.classList.toggle('on', p.id === 'pane-' + name);
+  }
+  async function openSettings(tab) {
+    cfg = await pywebview.api.get_config();
+    const catSel = $('catSelect'); catSel.innerHTML = '';
+    for (const c of (cfg.categories || ['기타'])) {
+      const o = document.createElement('option'); o.value = c; o.textContent = c; catSel.appendChild(o);
+    }
+    catSel.value = (cfg.mob_category || {})[cfg.current_monster] || '기타';
+    fillMobSelect(catSel.value);
+    const sel = $('mobSelect');
+    sel.value = cfg.current_monster;
+    try {
+      const au = await pywebview.api.auth_status();
+      $('authId').value = au.auth_id || ''; $('authMsg').textContent = au.label || '';
+      $('banjaRow').style.display = au.banja ? '' : 'none';
+      $('banjaMode').checked = !!cfg.banja_mode;
+    } catch (e) {}
+    $('gmMsg').value = cfg.gm_chat_msg || '';
+    $('webhook').value = cfg.discord_webhook || '';
+    $('ntfy').value = cfg.ntfy_url || '';
+    $('dcToken').value = cfg.discord_token || '';
+    $('dcChannel').value = cfg.discord_channel || '';
+    $('nWhisper').checked = !!cfg.notify_whisper;
+    $('nNormal').checked = !!cfg.notify_normal;
+    $('nRepeat').checked = !!cfg.notify_repeat;
+    if (sel.value) await loadMobFields(sel.value);
+    $('saveMsg').textContent = '';
+    switchSetTab(tab || 'auth');
+    $('settings').classList.add('show');
+    $('scrim').classList.add('show');
+  }
+  function closeSettings() { $('settings').classList.remove('show'); $('scrim').classList.remove('show'); }
+  async function saveSettings() {
+    const name = $('mobSelect').value;
+    if (!name) { toast('이 카테고리에 몹이 없습니다', 'err'); return; }
+    const squad = [];
+    for (let i = 1; i <= 6; i++) squad.push(parseFloat($('squad' + i).value) || 0);
+    const bad = (r) => {
+      if (!r || !(r.error || r.conflict)) return false;
+      cfg = r;
+      $('saveMsg').textContent = r.error || '저장되지 않았습니다';
+      toast(r.error || '저장되지 않았습니다', 'err');
+      return true;
+    };
+    let res = await pywebview.api.save_monster_cfg(name, {
+      squad_counts: squad,
+      center_move_delay: parseFloat($('centerDelay').value) || 0,
+      lead_px: parseFloat($('leadPx').value) || 0,
+      summon_mode: $('summonMode').value,
+      use_summon: $('summonMode').value !== 'none',
+      multi_retreat: $('multiRetreat').checked,
+      noejeonju: $('noejeonju').checked,
+      attack_keys: getAttackKeys(),
+    }, cfg && cfg.stamp);
+    if (bad(res)) return;
+    cfg = res;
+    const common = {
+      gm_chat_msg: $('gmMsg').value, discord_webhook: $('webhook').value,
+      ntfy_url: $('ntfy').value, discord_token: $('dcToken').value,
+      discord_channel: $('dcChannel').value,
+      notify_whisper: $('nWhisper').checked, notify_normal: $('nNormal').checked,
+      notify_repeat: $('nRepeat').checked,
+    };
+    if ($('banjaRow').style.display !== 'none') common.banja_mode = $('banjaMode').checked;
+    res = await pywebview.api.save_common(common, cfg && cfg.stamp);
+    if (bad(res)) return;
+    cfg = res;
+    await pywebview.api.set_monster(name);
+    curMonster = name;
+    refreshMainPortrait();
+    closeSettings();
+    toast('설정 저장됨 · ' + name, 'ok');
+  }
+
+  async function openRecords() {
+    const box = $('recList');
+    box.innerHTML = '<div class="rec-empty">불러오는 중…</div>';
+    $('records').classList.add('show');
+    let recs = [];
+    try { recs = await pywebview.api.appear_records(); } catch (e) {}
+    if (!recs || !recs.length) { box.innerHTML = '<div class="rec-empty">출현 기록이 없습니다</div>'; return; }
+    const rows = recs.map((r, i) => ({ ...r, gap: i > 0 ? r.count - recs[i - 1].count : null }));
+    box.innerHTML = '';
+    for (const r of rows) {
+      const warn = r.gap !== null && r.gap < 230;
+      const d = document.createElement('div');
+      d.className = 'rec-row' + (warn ? ' warn' : '');
+      d.innerHTML = '<span class="rt"></span><span class="rk"></span><span class="rc"></span><span class="rd"></span>';
+      d.querySelector('.rt').textContent = r.time;
+      d.querySelector('.rk').textContent = r.kind;
+      d.querySelector('.rc').textContent = r.count + '회';
+      d.querySelector('.rd').textContent = r.gap === null ? '—' : '+' + r.gap;
+      box.appendChild(d);
+    }
+    const body = box.closest('.modal-body');
+    if (body) body.scrollTop = body.scrollHeight;
+  }
+  function closeRecords() { $('records').classList.remove('show'); }
+
+  let killTimer = null;
+  async function renderKillList() {
+    const list = $('killList');
+    let rows = [];
+    try { rows = await pywebview.api.kill_rank(); } catch (e) {}
+    if (!rows || !rows.length) { list.innerHTML = '<div class="rec-empty">아직 집계된 전투 없음</div>'; return; }
+    const max = Math.max.apply(null, rows.map(r => r.share)) || 1;
+    list.innerHTML = '';
+    let rank = 1;
+    for (const r of rows) {
+      const w = Math.max(3, Math.round((r.share / max) * 100));
+      const tier = r.tier ? '<span class="kill-tier">참여 ' + r.tier + '%</span>' : '';
+      const d = document.createElement('div');
+      d.className = 'kill-row';
+      d.innerHTML = '<span class="kill-rank">' + rank + '</span><span class="kill-name"></span>' +
+        '<span class="kill-bar"><i style="width:' + w + '%"></i></span>' + tier +
+        '<span class="kill-pct">' + r.share.toFixed(1) + '%</span>';
+      d.querySelector('.kill-name').textContent = r.name;
+      list.appendChild(d);
+      rank++;
+    }
+  }
+  async function openKillRank() {
+    $('killList').innerHTML = '<div class="rec-empty">불러오는 중…</div>';
+    $('killRank').classList.add('show');
+    await renderKillList();
+    if (killTimer) clearInterval(killTimer);
+    killTimer = setInterval(renderKillList, 1500);
+  }
+  function closeKillRank() {
+    $('killRank').classList.remove('show');
+    if (killTimer) { clearInterval(killTimer); killTimer = null; }
+  }
+  async function resetCount() {
+    try {
+      const r = await pywebview.api.reset_count();
+      if (r) { setBattles(r.battle_count); toast('전투 횟수 초기화됨'); }
+    } catch (e) {}
+  }
+
+  window.addEventListener('pywebviewready', () => {
+    $('heroBtn').onclick = async () => {
+      const s = running ? await pywebview.api.stop() : await pywebview.api.start();
+      setStatus(s);
+    };
+    $('btnRecords').onclick = openRecords;
+    $('btnRecClose').onclick = closeRecords;
+    $('btnRecOk').onclick = closeRecords;
+    $('btnKill').onclick = openKillRank;
+    $('btnKillClose').onclick = closeKillRank;
+    $('btnKillOk').onclick = closeKillRank;
+    $('btnReset').onclick = resetCount;
+    $('btnSchedToggle').onclick = () => { $('schedWrap').classList.toggle('open'); };
+    $('btnSched').onclick = async () => {
+      if (schedActive) {
+        setStatus(await pywebview.api.schedule_stop());
+        toast('스케쥴 정지');
+      } else {
+        const cy = $('schCycles').value, ba = $('schBattles').value;
+        const rest = Math.round(parseFloat($('schRest').value || '0') * 60);
+        const s = await pywebview.api.schedule_start(cy, ba, rest);
+        setStatus(s);
+        if (s.schedule && s.schedule.active)
+          toast(`스케쥴 시작 — ${cy}사이클 × ${ba}전투`, 'ok');
+      }
+    };
+    $('records').onclick = e => { if (e.target.id === 'records') closeRecords(); };
+    $('killRank').onclick = e => { if (e.target.id === 'killRank') closeKillRank(); };
+    $('scrim').onclick = closeSettings;
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      closeSettings(); closeRecords(); closeKillRank();
+    });
+    buildSquad();
+    buildAttackKeys();
+    $('btnGear').onclick = openSettings;
+    $('monsterRow').onclick = () => openSettings('mob');
+    $('btnClose').onclick = closeSettings;
+    $('btnCancel').onclick = closeSettings;
+    $('btnSave').onclick = saveSettings;
+    $('mobSelect').onchange = e => loadMobFields(e.target.value);
+    $('catSelect').onchange = e => {
+      fillMobSelect(e.target.value);
+      const sel = $('mobSelect');
+      if (sel.options.length) { sel.value = sel.options[0].value; loadMobFields(sel.value); }
+    };
+    for (const b of document.querySelectorAll('#setTabs button')) b.onclick = () => switchSetTab(b.dataset.set);
+    for (const b of document.querySelectorAll('#logTabs button')) {
+      b.onclick = () => {
+        for (const x of document.querySelectorAll('#logTabs button')) x.classList.toggle('on', x === b);
+        for (const x of document.querySelectorAll('.logbox')) x.classList.toggle('on', x.id === b.dataset.log);
+      };
+    }
+    $('btnTestWebhook').onclick = async () => { toast(await pywebview.api.test_webhook($('webhook').value)); };
+    $('btnTestNtfy').onclick = async () => { toast(await pywebview.api.test_ntfy($('ntfy').value)); };
+    $('btnLogin').onclick = doLogin;
+    $('btnLogout').onclick = doLogout;
+    initResize();
+    $('btnMin').onclick = () => pywebview.api.win_minimize();
+    $('btnWinClose').onclick = () => pywebview.api.win_close();
+    $('btnUpdate').onclick = async () => {
+      toast('업데이트 시작 — 앱을 다시 시작합니다', 'ok');
+      try {
+        const r = await pywebview.api.self_update();
+        if (r && !r.ok) toast(r.msg || '업데이트 실패', 'err');
+      } catch (e) { toast('업데이트 요청 실패', 'err'); }
+    };
+    refreshMainPortrait();
+    loadSchedParams();
+    pollAll(); setInterval(pollAll, 400);
+  });
+</script>
+</body>
+</html>
