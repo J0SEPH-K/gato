@@ -1484,7 +1484,7 @@ def mob_aim_y4(monster: str):
 
 def mob_fire_roi(monster: str):
     m = _mob(monster)
-    if not m.get('fire_filter', False):
+    if not m.get('fire_filter', True):
         return None
     return tuple(m.get('fire_roi', [
         0.5,

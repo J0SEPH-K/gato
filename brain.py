@@ -143,8 +143,6 @@ def _gato_read_exp():
         return None
 def _r_death(h):
     h.click(557, 440)
-    time.sleep(1.0)
-    h.combo('alt', '2')
 def _r_friend(h):
     h.click(632, 426)
 def _r_map(h):
@@ -158,7 +156,7 @@ def _r_tban(h):
     h.press('x')
 def _r_restart(h):
     h.click(466, 420)
-REACTIONS = {'사망': (_r_death, 5.0, '부활 확인 + 불사신부 (Alt+2)'), '친구 요청': (_r_friend, 3.0, '거절 클릭'), '지도 열림': (_r_map, 2.0, '지도 닫기 (M)'), 'B모드': (_r_bmode, 2.0, '전투모드 해제 (A)'), 'T밴(거래차단)': (_r_tban, 2.0, '거래차단 해제 (X)'), 'restart 팝업': (_r_restart, 2.0, '팝업 클릭')}
+REACTIONS = {'사망': (_r_death, 5.0, '부활 확인 클릭'), '친구 요청': (_r_friend, 3.0, '거절 클릭'), '지도 열림': (_r_map, 2.0, '지도 닫기 (M)'), 'B모드': (_r_bmode, 2.0, '전투모드 해제 (A)'), 'T밴(거래차단)': (_r_tban, 2.0, '거래차단 해제 (X)'), 'restart 팝업': (_r_restart, 2.0, '팝업 클릭')}
 STOP_TRIGGERS = {'포만감 템 없음', '무게 꽉 참'}
 NOTIFY_TRIGGERS = {'친구 요청'}
 POPUP_CROP = (348, 322, 764, 452)
@@ -284,6 +282,7 @@ class Brain:
                 self._ensure_window_visible()
                 self._check_idle_warning()
                 self._check_revive_popup()
+                self._learn_mercs()
                 if False and time.time() - max(self._moved_at, self._battle_at) >= self.AFK_SEC and not self._afk_busy():
                     # DISABLED (manager, 2026-11-19): confirmed live, twice,
                     # that this nudge's right-click reliably lands on a map
@@ -592,8 +591,6 @@ class Brain:
                             hands.move(557, 440, wait=True)
                             time.sleep(0.3)
                             hands.click(557, 440, wait=True)
-                            time.sleep(1.0)
-                            hands.combo('alt', '2', wait=True)
                     if self._sub_solving:
                         continue
                     else:
@@ -809,8 +806,8 @@ class Brain:
                             self._gato_death_key = prev
                             return
                         else:
-                            self._log(f'용병 부활 (사망 전투#{key[0]}, 기록 bc={bc}, lag={bc - key[0]}전투)')
-                            self.hands.combo('alt', '2')
+                            self._log(f'[용병] 고트 기록상 사망 전투#{key[0]} — 화면에서 확인 후에만 부활')
+                            self._revive_dead_mercs(frame)
     def _check_merc_deaths_ui(self) -> bool:
         try:
             import traders_ctl
@@ -827,8 +824,8 @@ class Brain:
                 if frame is None or not combat.is_main(frame):
                     return True
                 else:
-                    self._log(f"용병 부활 (UI 감지: {', '.join(sorted(dead))})")
-                    self.hands.combo('alt', '2')
+                    self._log(f"[용병] 고트 UI상 사망 {', '.join(sorted(dead))} — 화면에서 확인 후에만 부활")
+                    self._revive_dead_mercs(frame)
                     return True
     _EXP_TIERS_OFF = (20, 30, 35, 40, 45, 50, 55)
     _EXP_TIERS_ON = (23, 33, 38, 43, 48, 53, 58)
@@ -1210,13 +1207,35 @@ class Brain:
         fmt = lambda v: 'n/a' if v is None else f'{v * 100:.0f}%'
         self._log(f'[포만감] 궁중 타락죽 {eaten}개 사용: {fmt(start)} → {fmt(end)} ({why})')
         return True
+    def _learn_mercs(self) -> None:
+        if self._battle_running:
+            return
+        f = self._grab_main()
+        if f is not None and vis.detect_scene(f) == 'main':
+            self._update_merc_baseline(f)
+    def _update_merc_baseline(self, frame) -> None:
+        """Remember each portrait slot's brightness while it shows an HP bar (= alive)."""
+        base = self.__dict__.setdefault('_merc_base', {})
+        for slot, bar, mean in vis.merc_slots(frame):
+            if bar:
+                base[slot] = mean if slot not in base else 0.9 * base[slot] + 0.1 * mean
     def _revive_dead_mercs(self, frame) -> bool:
-        """Dead 용병 (portrait without HP bar) before the next fight: Alt+1, then Alt+2 (반계탕)."""
-        dead = vis.dead_mercs(frame)
+        """Alt+1, then Alt+2 -- ONLY when a 용병 is dead: no HP bar AND a dimmed portrait versus its
+        own alive baseline, seen on two frames 0.4 s apart. Every press is logged with the slots
+        and a frame is saved to debug/revive/ so a wrong press can be audited."""
+        if frame is None:
+            return False
+        base = self.__dict__.setdefault('_merc_base', {})
+        dead = vis.dead_mercs_vs(frame, base)
         if not dead:
             return False
         now = time.time()
         if now - getattr(self, '_revive_at', 0.0) < 15.0:
+            return False
+        time.sleep(0.4)
+        fresh = self._grab_main()
+        dead = [d for d in dead if d in vis.dead_mercs_vs(fresh, base)] if fresh is not None else []
+        if not dead:
             return False
         hist = [t for t in getattr(self, '_revive_hist', []) if now - t < 600.0]
         if len(hist) >= 4:
@@ -1227,12 +1246,20 @@ class Brain:
         hist.append(now)
         self._revive_hist = hist
         self._revive_at = now
-        self._log(f'[용병] 죽은 용병 슬롯 {dead} — Alt+1, Alt+2 부활')
+        stats = {s: (round(m), round(base[s])) for s, bar, m in vis.merc_slots(fresh) if s in dead}
+        self._log(f'[용병] 죽은 용병 슬롯 {dead} (밝기 현재/평소 {stats}) — Alt+1, Alt+2')
+        try:
+            d = os.path.join(config.BASE_DIR, 'debug', 'revive')
+            os.makedirs(d, exist_ok=True)
+            if len(os.listdir(d)) < 30:
+                cv2.imwrite(os.path.join(d, time.strftime('%H%M%S') + '.png'), fresh)
+        except Exception:
+            pass
         self.hands.combo('alt', '1', wait=True)
         time.sleep(0.5)
         self.hands.combo('alt', '2', wait=True)
         time.sleep(1.2)
-        left = vis.dead_mercs(self._grab_main())
+        left = vis.dead_mercs_vs(self._grab_main(), base)
         self._log('[용병] 부활 후 남은 사망 슬롯: ' + (str(left) if left else '없음'))
         return True
     def _prefight(self, frame) -> bool:
@@ -1241,6 +1268,7 @@ class Brain:
         cfg = config.load()
         if frame is None:
             return False
+        self._update_merc_baseline(frame)
         if cfg.get('prefight_revive', True) and self._revive_dead_mercs(frame):
             return True
         if cfg.get('prefight_food', True):

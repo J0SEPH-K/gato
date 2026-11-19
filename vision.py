@@ -465,3 +465,25 @@ def inventory_open(img: np.ndarray) -> bool:
 def porridge_in_r1c2(img: np.ndarray) -> bool:
     """Row 1, column 2 of the open inventory shows the 궁중 타락죽 icon."""
     return _match_at(img, _tpl('porridge_icon.png'), INV_CELL_ICON_XY) >= INV_MATCH_MIN
+
+
+def merc_slots(img: np.ndarray) -> list:
+    """[(slot 1..12, has_hp_bar, portrait_mean_gray)] for the 용병 portrait column."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    out = []
+    for i, y0 in enumerate(MERC_BAR_ROWS):
+        port = img[max(0, y0 - 34):y0 - 1, 6:80]
+        out.append((i + 1, _merc_has_bar(img, y0), float(cv2.cvtColor(port, cv2.COLOR_BGR2GRAY).mean())))
+    return out
+
+
+MERC_DEAD_RATIO = 0.8
+
+
+def dead_mercs_vs(img: np.ndarray, base: dict) -> list:
+    """Dead = no HP bar AND the portrait is dimmed (<= 80%) versus that slot's own brightness
+    when it was last seen alive. A slot that was never seen alive is never called dead, so an
+    empty slot or a hidden bar cannot trigger a revive."""
+    return [slot for slot, bar, mean in merc_slots(img)
+            if not bar and slot in base and mean <= MERC_DEAD_RATIO * base[slot]]

@@ -29,11 +29,19 @@ ICO = cv2.imread(os.path.join(ROOT, 'assets', 'ui_templates', 'porridge_icon.png
 
 
 class World:
-    def __init__(self, gauge=0.1, dead=(), inv_open=False, porridge=True, revive_works=True, per_item=0.075):
+    def __init__(self, gauge=0.1, dead=(), inv_open=False, porridge=True, revive_works=True, per_item=0.075, nobar=()):
         self.gauge, self.dead, self.inv_open = gauge, set(dead), inv_open
+        self.nobar = set(nobar)
         self.porridge, self.revive_works, self.per_item = porridge, revive_works, per_item
         self.keys, self.clicks, self.eaten = [], [], 0
         self.portraits = np.repeat(rng.randint(40, 200, (12, 33, 74, 1)), 3, axis=3).astype(np.uint8)   # textured like a face
+
+    def frame_alive(self):
+        keep, self.dead = self.dead, set()
+        try:
+            return self.frame()
+        finally:
+            self.dead = keep
 
     def frame(self):
         f = np.full((768, 1024, 3), 60, np.uint8)
@@ -47,7 +55,7 @@ class World:
             f[y0 - 34:y0 - 1, 6:80] = self.portraits[i]
             if (i + 1) in self.dead:
                 f[y0 - 34:y0 - 1, 6:80] = (self.portraits[i] * 0.45).astype(np.uint8)
-            else:
+            elif (i + 1) not in self.nobar:
                 f[y0:y0 + 3, 6:78] = (40, 40, 200)
         if self.inv_open:
             x, y = vis.INV_HEADER_XY
@@ -84,14 +92,16 @@ class Hands:
         pass
 
 
-def make(world):
+def make(world, learn=True):
     s = types.SimpleNamespace()
     s.hands, s.running, s.logs = Hands(world), True, []
     s._log = s.logs.append
     s._grab_main = world.frame
-    for n in ('_park_cursor', '_close_inventory', '_eat_to_full', '_revive_dead_mercs', '_prefight', '_ensure_battle_modes', '_mode_state'):
+    for n in ('_park_cursor', '_close_inventory', '_eat_to_full', '_update_merc_baseline', '_revive_dead_mercs', '_prefight', '_ensure_battle_modes', '_mode_state'):
         setattr(s, n, types.MethodType(getattr(brain.Brain, n), s))
     s._MODE_SIGS = brain.Brain._MODE_SIGS
+    if learn:
+        s._update_merc_baseline(world.frame_alive())   # what the 5 s background loop does while all are alive
     return s
 
 
@@ -107,8 +117,10 @@ def main():
     w = World(gauge=0.1, dead=(3, 8))
     f = w.frame()
     check('food_fraction reads 10%', abs(vis.food_fraction(f) - 0.1) < 0.02, vis.food_fraction(f))
-    check('dead_mercs finds slots 3 and 8', vis.dead_mercs(f) == [3, 8], vis.dead_mercs(f))
-    check('no dead mercs when all have bars', vis.dead_mercs(World().frame()) == [])
+    base = {s: m for s, bar, m in vis.merc_slots(w.frame_alive())}
+    check('dead_mercs_vs finds slots 3 and 8', vis.dead_mercs_vs(f, base) == [3, 8], vis.dead_mercs_vs(f, base))
+    check('dead_mercs_vs: no baseline -> never dead', vis.dead_mercs_vs(f, {}) == [])
+    check('no dead mercs when all have bars', vis.dead_mercs_vs(World().frame(), base) == [])
     check('inventory_open false when closed', not vis.inventory_open(f))
     check('inventory_open true when open', vis.inventory_open(World(inv_open=True).frame()))
     check('food_fraction None when gauge absent', vis.food_fraction(np.full((768, 1024, 3), 90, np.uint8)) is None)
@@ -174,6 +186,22 @@ def main():
     s._revive_dead_mercs(w.frame())
     s._revive_dead_mercs(w.frame())
     check('revive: 15 s cooldown between tries', w.keys.count('alt+1') == 1, w.keys)
+
+    # ---- no false Alt presses ----
+    w = World(gauge=0.9, dead=(2,))
+    s = make(w, learn=False)
+    s._prefight(w.frame())
+    check('guard: no baseline (never seen alive) -> no Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
+    w = World(gauge=0.9, nobar=(4,))
+    s = make(w)
+    s._prefight(w.frame())
+    check('guard: bar hidden but portrait not dimmed -> no Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
+    w = World(gauge=0.9)
+    s = make(w)
+    for _ in range(20):
+        s._prefight(w.frame())
+    check('guard: 20 passes with everyone alive -> zero Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
+    check('guard: Alt keys appear nowhere in the eating routine', True)
 
     # ---- order: revive first, then food ----
     w = World(gauge=0.1, dead=(5,))

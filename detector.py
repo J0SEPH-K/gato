@@ -485,7 +485,11 @@ class SpriteDetector:
             if excl and _overlap_frac(box, excl) >= AVOID_OVERLAP:
                 continue
             if fire_roi is not None and self.has_fire(frame_bgr, box, tag, fire_roi, rect = fire_rect):
-                if not fire_rect and lowf < FIRE_LOW_INTACT or fire_ambient(frame_bgr, box):
+                # Fire ring at the mob's feet = another player/party is already fighting it.
+                # With a tuned fire_rect that is decisive. (The decompiled condition used to
+                # skip such a mob only when the fire was 'ambient', so engaged mobs were kept:
+                # live 2026-11-19, 3 of 3 ringed 도사_귀 flagged, 2 of them still clicked.)
+                if fire_rect or lowf < FIRE_LOW_INTACT or fire_ambient(frame_bgr, box):
                     continue
             out.append([
                 (box[0] + box[2]) / 2.0,
