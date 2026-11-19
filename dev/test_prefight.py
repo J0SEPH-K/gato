@@ -7,6 +7,7 @@ using the same geometry the macro reads, and records every key/click the macro s
 """
 import os
 import sys
+import time
 import types
 
 import cv2
@@ -184,9 +185,9 @@ def main():
     w = World(gauge=0.9, dead=(2,), revive_works=False)
     s = make(w)
     for _ in range(6):
-        s._revive_at = 0.0
+        s._revive_at = time.time() - 7.0
         s._revive_dead_mercs(w.frame())
-    check('revive: capped at 3 tries per 10 min when it keeps failing', w.keys.count('alt+1') == 3, w.keys.count('alt+1'))
+    check('revive: stops after 3 failed tries in a row', w.keys.count('alt+1') == 3, w.keys.count('alt+1'))
 
     w = World(gauge=0.9, dead=(2,), revive_works=False)
     s = make(w)

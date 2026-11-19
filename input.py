@@ -258,7 +258,7 @@ class Hands:
                 return True
             time.sleep(0.004)
         return False
-    def click(self, x, y, button='left', down_ms=0.03, wait=False):
+    def click(self, x, y, button='left', down_ms=0.08, wait=False):
         def _fn():
             hwnd = self._foreground()
             if not hwnd:

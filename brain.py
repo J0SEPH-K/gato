@@ -1290,7 +1290,7 @@ class Brain:
         if not dead:
             return False
         now = time.time()
-        if now - getattr(self, '_revive_at', 0.0) < 15.0:
+        if now - getattr(self, '_revive_at', 0.0) < 6.0:
             return False
         time.sleep(0.4)
         fresh = self._grab_main()
@@ -1298,14 +1298,11 @@ class Brain:
         dead = [d for d in dead if d in again]
         if not dead:
             return False
-        hist = [t for t in getattr(self, '_revive_hist', []) if now - t < 600.0]
-        if len(hist) >= 3:
+        if getattr(self, '_revive_fail', 0) >= 3 and now - getattr(self, '_revive_at', 0.0) < 300.0:
             if now - getattr(self, '_revive_cap_log', 0.0) > 120.0:
                 self._revive_cap_log = now
-                self._log(f'[용병] 죽은 용병 {dead} — 10분 내 부활 3회 한도 도달, 건너뜀 (반계탕 확인)')
+                self._log(f'[용병] 죽은 용병 {dead} — Alt 부활이 3회 연속 실패, 5분 쉼 (반계탕 확인)')
             return False
-        hist.append(now)
-        self._revive_hist = hist
         self._revive_at = now
         self._log(f'[용병] 죽은 용병 슬롯 {dead} — Alt+1 한 번으로 전원 부활 시도')
         try:
@@ -1323,6 +1320,7 @@ class Brain:
             self.hands.combo('alt', '2', wait=True)
             time.sleep(1.5)
             left = vis.dead_mercs_v2(self._grab_main(), occ)
+        self._revive_fail = (getattr(self, '_revive_fail', 0) + 1) if left else 0
         self._log('[용병] 부활 후 남은 사망 슬롯: ' + (str(left) if left else '없음'))
         return True
     def _prefight(self, frame) -> bool:
@@ -1935,6 +1933,15 @@ class Brain:
                                                                         if self._prefight(img):
                                                                             continue
                                                                         self.hands.click(int(x), int(y), 'right')
+                                                                        try:
+                                                                            _d = os.path.join(config.BASE_DIR, 'debug', 'clicks')
+                                                                            os.makedirs(_d, exist_ok=True)
+                                                                            if len(os.listdir(_d)) < 80:
+                                                                                _im = img.copy()
+                                                                                cv2.circle(_im, (int(x), int(y)), 16, (0, 255, 0), 2)
+                                                                                cv2.imwrite(os.path.join(_d, time.strftime('%H%M%S') + '.jpg'), _im, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                                                        except Exception:
+                                                                            pass
                                                                         self._moved_at = time.time()
                                                                         self._battle_click = -detector.click_cooldown(dist)
                                                                         search_window.reset()
