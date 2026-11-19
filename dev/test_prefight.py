@@ -33,7 +33,7 @@ class World:
         self.gauge, self.dead, self.inv_open = gauge, set(dead), inv_open
         self.porridge, self.revive_works, self.per_item = porridge, revive_works, per_item
         self.keys, self.clicks, self.eaten = [], [], 0
-        self.portraits = rng.randint(40, 200, (12, 33, 74, 3)).astype(np.uint8)
+        self.portraits = np.repeat(rng.randint(40, 200, (12, 33, 74, 1)), 3, axis=3).astype(np.uint8)   # textured like a face
 
     def frame(self):
         f = np.full((768, 1024, 3), 60, np.uint8)

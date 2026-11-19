@@ -428,7 +428,7 @@ def dead_mercs(img: np.ndarray) -> list:
             continue          # alive
         port = img[max(0, y0 - 34):y0 - 1, 6:80]
         gray = cv2.cvtColor(port, cv2.COLOR_BGR2GRAY)
-        if gray.mean() >= 38 and gray.std() >= 18:     # a portrait is there (not an empty panel)
+        if gray.mean() >= 30 and gray.std() >= 15:     # a portrait is there (not an empty panel)
             dead.append(i + 1)
     return dead
 
