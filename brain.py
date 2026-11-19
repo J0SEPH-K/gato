@@ -1147,12 +1147,51 @@ class Brain:
             else:
                 if self.hands.click(*target, button='left', wait=True):
                     self._log(f'{self.monster}: 다시하기 후 이동 {target}')
+    # 전투모드 (hotkey A) and 거래차단 (hotkey X) indicator signatures, measured live on a native
+    # 1024x768 frame (see vision.TRIGGERS comment): (box, on_sum, off_sum). Any other sum = unknown,
+    # and unknown is never toggled.
+    _MODE_SIGS = {'a': ('전투모드', (849, 716, 851, 717), 1500, 6), 'x': ('거래차단', (947, 714, 949, 715), 1500, 233)}
+    def _mode_state(self, frame, key):
+        _name, box, on, off = self._MODE_SIGS[key]
+        s = vis._px_sum(frame, *box)
+        return True if s == on else (False if s == off else None)
+    def _ensure_battle_modes(self, frame) -> None:
+        """Right before a fight starts: make sure 전투모드 and 거래차단 are ON (toggle keys A / X)."""
+        if frame is None or not config.load().get('battle_modes', True):
+            return
+        if time.time() - getattr(self, '_modes_at', 0.0) < 3.0:
+            return
+        if vis.chat_hangul_state(frame) != 'inactive':
+            return   # chat box has focus: a letter key would be typed, not toggled
+        todo = []
+        for key in ('a', 'x'):
+            st = self._mode_state(frame, key)
+            if st is False:
+                todo.append(key)
+            elif st is None and time.time() - getattr(self, '_modes_unk_at', 0.0) >= 60.0:
+                self._modes_unk_at = time.time()
+                self._log(f'[모드] {self._MODE_SIGS[key][0]} 상태 인식 불가 — 건드리지 않음')
+        if not todo:
+            return
+        self._modes_at = time.time()
+        for key in todo:
+            self.hands.press(key, wait=True)
+            time.sleep(0.3)
+        time.sleep(0.4)
+        after = self._grab_main()
+        res = []
+        for key in todo:
+            st = self._mode_state(after, key) if after is not None else None
+            res.append(f"{self._MODE_SIGS[key][0]} {'ON' if st else ('여전히 OFF' if st is False else '확인불가')}")
+        self._log('[모드] 전투 시작 전 자동 설정: ' + ', '.join(res))
     def _do_reactions(self, fired: set[str]):
         now = time.time()
         for name in sorted(fired):
             entry = REACTIONS.get(name)
             if entry is None:
                 continue
+            if name in ('B모드', 'T밴(거래차단)') and config.load().get('battle_modes', True):
+                continue   # these reactions switch the modes OFF; battle_modes wants them ON
             else:
                 fn, cooldown, desc = entry
                 if now - self._react_at.get(name, 0.0) < cooldown:
@@ -1670,6 +1709,7 @@ class Brain:
                                                                             pick = None
                                                                     if pick:
                                                                         x, y, dist = pick
+                                                                        self._ensure_battle_modes(img)
                                                                         self.hands.click(int(x), int(y), 'right')
                                                                         self._moved_at = time.time()
                                                                         self._battle_click = -detector.click_cooldown(dist)

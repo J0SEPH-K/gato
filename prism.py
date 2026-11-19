@@ -977,24 +977,32 @@ def install_error_hooks(api):
             _report(f'thread:{name}', args.exc_type, args.exc_value, args.exc_traceback)
     threading.excepthook = _thread_hook
 def start_f10_hotkey(api):
+    """Global hotkeys (polled, so they work while the game has focus):
+    F3 = 전투 시작, F4 = 전투 종료, F10 = toggle (kept from the original)."""
     def _loop():
         user32 = ctypes.windll.user32
-        VK_F10 = 121
-        prev = False
-        last = 0.0
+        VK_F3, VK_F4, VK_F10 = 114, 115, 121
+        prev = {VK_F3: False, VK_F4: False, VK_F10: False}
+        last = {VK_F3: 0.0, VK_F4: 0.0, VK_F10: 0.0}
         while True:
-            down = bool(user32.GetAsyncKeyState(VK_F10) & 32768)
             now = time.time()
-            if down and (not prev) and (now - last > 0.3):
-                        last = now
-                        try:
-                            if api.brain.running:
-                                api.stop()
-                            else:
-                                api.start()
-                        except Exception:
-                            pass
-            prev = down
+            for vk in (VK_F3, VK_F4, VK_F10):
+                down = bool(user32.GetAsyncKeyState(vk) & 32768)
+                if down and (not prev[vk]) and (now - last[vk] > 0.3):
+                    last[vk] = now
+                    try:
+                        running = api.brain.running
+                        if vk == VK_F3 and not running:
+                            api.vision.note('input', '[F3] 전투 시작')
+                            api.start()
+                        elif vk == VK_F4 and running:
+                            api.vision.note('input', '[F4] 전투 종료')
+                            api.stop()
+                        elif vk == VK_F10:
+                            api.stop() if running else api.start()
+                    except Exception:
+                        pass
+                prev[vk] = down
             time.sleep(0.015)
     threading.Thread(target=_loop, daemon=True).start()
 def main():

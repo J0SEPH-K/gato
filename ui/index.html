@@ -660,6 +660,7 @@
     hb.classList.remove('idle', 'connecting', 'running');
     hb.classList.add(running ? (s.window_found ? 'running' : 'connecting') : 'idle');
     $('heroGlyph').textContent = running ? (s.window_found ? '종료' : '연결 중') : '시작';
+    hb.title = running ? '전투 종료 (F4)' : '전투 시작 (F3)';
     $('runDot').classList.toggle('on', running);
 
     setChip('conn', running && s.window_found, running ? (s.window_found ? '가동 중' : '창 대기') : '정지');
