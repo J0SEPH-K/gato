@@ -1,8 +1,7 @@
 ; Inno Setup script: wraps dist\Gato (PyInstaller output) into one GatoSetup.exe
 #define AppName "GATO"
-#define AppVersion GetFileVersion("..\dist\Gato\Gato.exe")
-#ifexist "..\VERSION"
-  #define AppVersion Trim(FileRead(FileOpen("..\VERSION")))
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
 #endif
 
 [Setup]

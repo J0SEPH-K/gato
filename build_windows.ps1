@@ -31,6 +31,8 @@ if (-not $iscc) {
     $iscc = 'C:\InnoSetup\ISCC.exe'
 }
 Write-Host '== Inno Setup =='
-& $iscc 'installer\gato.iss'
+$ver = (Get-Content 'VERSION' -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $ver) { $ver = '1.0.0' }
+& $iscc "/DAppVersion=$ver" 'installer\gato.iss'
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
 Get-Item 'dist-installer\GatoSetup.exe' | Select-Object FullName, @{n='MB';e={[math]::Round($_.Length/1MB)}}
