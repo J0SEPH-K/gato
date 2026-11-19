@@ -141,8 +141,11 @@ def _gato_read_exp():
         return (bc, exp_row, names, codes)
     except Exception:
         return None
+def _food_key() -> str:
+    k = str(config.load().get('food_key', '2') or '2').strip()
+    return k if k in tuple('123456789') else '2'
 def _r_food(h):
-    h.combo('alt', '1')
+    h.combo('alt', _food_key())
 def _r_death(h):
     h.click(557, 440)
     time.sleep(1.0)
@@ -160,7 +163,7 @@ def _r_tban(h):
     h.press('x')
 def _r_restart(h):
     h.click(466, 420)
-REACTIONS = {'포만감 부족': (_r_food, 0.2, '포만감 섭취 (Alt+1)'), '사망': (_r_death, 5.0, '부활 확인 + 불사신부 (Alt+2)'), '친구 요청': (_r_friend, 3.0, '거절 클릭'), '지도 열림': (_r_map, 2.0, '지도 닫기 (M)'), 'B모드': (_r_bmode, 2.0, '전투모드 해제 (A)'), 'T밴(거래차단)': (_r_tban, 2.0, '거래차단 해제 (X)'), 'restart 팝업': (_r_restart, 2.0, '팝업 클릭')}
+REACTIONS = {'포만감 부족': (_r_food, 0.2, '포만감 섭취 (Alt+숫자, 기본 2)'), '사망': (_r_death, 5.0, '부활 확인 + 불사신부 (Alt+2)'), '친구 요청': (_r_friend, 3.0, '거절 클릭'), '지도 열림': (_r_map, 2.0, '지도 닫기 (M)'), 'B모드': (_r_bmode, 2.0, '전투모드 해제 (A)'), 'T밴(거래차단)': (_r_tban, 2.0, '거래차단 해제 (X)'), 'restart 팝업': (_r_restart, 2.0, '팝업 클릭')}
 STOP_TRIGGERS = {'포만감 템 없음', '무게 꽉 참'}
 NOTIFY_TRIGGERS = {'친구 요청'}
 POPUP_CROP = (348, 322, 764, 452)
@@ -596,8 +599,8 @@ class Brain:
                             time.sleep(1.0)
                             hands.combo('alt', '2', wait=True)
                         if '포만감 부족' in fired:
-                            self._log(f'[{tag}] 포만감 부족 → Alt+1')
-                            hands.combo('alt', '1', wait=True)
+                            self._log(f'[{tag}] 포만감 부족 → Alt+{_food_key()}')
+                            hands.combo('alt', _food_key(), wait=True)
                             time.sleep(0.5)
                             img2 = grab_hwnd(hwnd)
                             if img2 is not None and '포만감 템 없음' in vis.check_triggers(img2):
@@ -733,9 +736,22 @@ class Brain:
             except Exception:
                 self._gato_pid_cached = False
             return self._gato_pid_cached
+    def _revive_mercs(self) -> bool:
+        """After a fight, use the two revive items (Alt+1, Alt+2) once. True = handled here."""
+        if not config.load().get('merc_revive', True):
+            return False
+        frame = self._grab_main()
+        if frame is None or not combat.is_main(frame):
+            self._log('용병 부활 스킵 — 메인 화면 아님')
+            return True
+        self._log('용병 부활 시도 (Alt+1, Alt+2)')
+        self.hands.combo('alt', '1')
+        time.sleep(0.4)
+        self.hands.combo('alt', '2')
+        return True
     def _delayed_merc_check(self):
         time.sleep(1.0)
-        ui_ok = self._check_merc_deaths_ui()
+        ui_ok = self._revive_mercs() or self._check_merc_deaths_ui()
         prev_bc = getattr(self, '_gato_bc', None)
         deadline = time.time() + 30.0
         advanced_at = None
