@@ -183,6 +183,14 @@ MOB_CATALOG = {
             0.66,
             1.19],
         'category': '광려산/환상계곡' },
+    '너구리': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'sprite': [
+            'raccoondog_online'],
+        'category': '기타' },
     '건달바의혼': {
         'model': 'best_mob_gun.pt',
         'conf': 0.8,
