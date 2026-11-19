@@ -24,8 +24,6 @@ PIXEL_TOL = 10   # vendor value; live main pixel (99,42,25) is within it on ever
 # pixels (255*3*2). 77698a7 replaced these with sums measured on the NORMAL screen and a
 # +-60 tolerance, which made every trigger fire on an ordinary town frame; restored 2026-11-17.
 TRIGGERS = {
-    '포만감 부족': [
-        (162, 673, 163, 674, 141)],
     '사망': [
         (454, 344, 456, 345, 1530),
         (506, 353, 508, 354, 1530),
@@ -378,3 +376,86 @@ def find_revive_popup(img: np.ndarray):
     if min(best) >= REVIVE_TEXT_MIN:
         return ('ok', REVIVE_CLICK_XY)
     return ('unknown', None)
+
+
+# ---- 포만감 gauge, 용병 portraits, inventory (measured 2026-11-19 on a native 1024x768 client) ----
+_UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'ui_templates')
+FOOD_BAR_X = (89, 235)          # first/last pixel column of the gauge
+FOOD_BAR_Y = 673                # a row through the fill (fill is y 670..677)
+FOOD_LOW_FRAC = 0.2
+
+
+def food_fraction(img: np.ndarray):
+    """포만감 fill 0.0..1.0, or None if the gauge is not on screen (battle scene, covered...)."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return None
+    # frame of the gauge: black line above the fill and the dark right border
+    if int(img[669, 150].sum()) > 40 or int(img[FOOD_BAR_Y, FOOD_BAR_X[1] + 1].sum()) > 60:
+        return None
+    n = 0
+    for x in range(FOOD_BAR_X[0], FOOD_BAR_X[1] + 1):
+        b, g, r = (int(v) for v in img[FOOD_BAR_Y, x])
+        if g > r + 25 and g > b + 25 and g > 70:
+            n += 1
+        else:
+            break
+    return n / float(FOOD_BAR_X[1] - FOOD_BAR_X[0] + 1)
+
+
+MERC_BAR_ROWS = tuple(35 + 41 * i for i in range(12))   # red HP bar rows of the 12 portrait slots
+MERC_BAR_X = (4, 84)
+
+
+def dead_mercs(img: np.ndarray) -> list:
+    """1-based portrait slots whose portrait is shown but whose red HP bar is gone (= dead)."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    dead = []
+    for i, y0 in enumerate(MERC_BAR_ROWS):
+        best, by = 0, y0
+        for y in range(y0 - 9, y0 + 12):
+            band = img[y:y + 3, MERC_BAR_X[0]:MERC_BAR_X[1]].astype(np.int16)
+            red = int(((band[..., 2] > 140) & (band[..., 1] < 70) & (band[..., 0] < 70)).sum())
+            if red > best:
+                best, by = red, y
+        if best >= 12:
+            continue          # has an HP bar -> alive
+        port = img[max(0, by - 34):by - 1, 6:80]
+        gray = cv2.cvtColor(port, cv2.COLOR_BGR2GRAY)
+        if gray.mean() >= 38 and gray.std() >= 18:     # a portrait is there (not an empty panel)
+            dead.append(i + 1)
+    return dead
+
+
+INV_HEADER_XY = (690, 100)
+INV_CELL_R1C2 = (640, 172)       # 궁중 타락죽 (row 1, column 2 of the 가방 tab)
+INV_CELL_ICON_XY = (622, 154)
+INV_MATCH_MIN = 0.85
+_tpl_cache = {}
+
+
+def _tpl(name):
+    if name not in _tpl_cache:
+        _tpl_cache[name] = cv2.imread(os.path.join(_UI_DIR, name))
+    return _tpl_cache[name]
+
+
+def _match_at(img, tpl, xy, pad=6):
+    if tpl is None or img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return 0.0
+    x, y = xy
+    h, w = tpl.shape[:2]
+    reg = img[max(0, y - pad):y + h + pad, max(0, x - pad):x + w + pad]
+    if reg.shape[0] < h or reg.shape[1] < w:
+        return 0.0
+    return float(cv2.matchTemplate(reg, tpl, cv2.TM_CCOEFF_NORMED).max())
+
+
+def inventory_open(img: np.ndarray) -> bool:
+    """The 가방 window is open at its default position."""
+    return _match_at(img, _tpl('inventory_header.png'), INV_HEADER_XY) >= INV_MATCH_MIN
+
+
+def porridge_in_r1c2(img: np.ndarray) -> bool:
+    """Row 1, column 2 of the open inventory shows the 궁중 타락죽 icon."""
+    return _match_at(img, _tpl('porridge_icon.png'), INV_CELL_ICON_XY) >= INV_MATCH_MIN

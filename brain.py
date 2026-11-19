@@ -141,11 +141,6 @@ def _gato_read_exp():
         return (bc, exp_row, names, codes)
     except Exception:
         return None
-def _food_key() -> str:
-    k = str(config.load().get('food_key', '2') or '2').strip()
-    return k if k in tuple('123456789') else '2'
-def _r_food(h):
-    h.combo('alt', _food_key())
 def _r_death(h):
     h.click(557, 440)
     time.sleep(1.0)
@@ -163,7 +158,7 @@ def _r_tban(h):
     h.press('x')
 def _r_restart(h):
     h.click(466, 420)
-REACTIONS = {'포만감 부족': (_r_food, 0.2, '포만감 섭취 (Alt+숫자, 기본 2)'), '사망': (_r_death, 5.0, '부활 확인 + 불사신부 (Alt+2)'), '친구 요청': (_r_friend, 3.0, '거절 클릭'), '지도 열림': (_r_map, 2.0, '지도 닫기 (M)'), 'B모드': (_r_bmode, 2.0, '전투모드 해제 (A)'), 'T밴(거래차단)': (_r_tban, 2.0, '거래차단 해제 (X)'), 'restart 팝업': (_r_restart, 2.0, '팝업 클릭')}
+REACTIONS = {'사망': (_r_death, 5.0, '부활 확인 + 불사신부 (Alt+2)'), '친구 요청': (_r_friend, 3.0, '거절 클릭'), '지도 열림': (_r_map, 2.0, '지도 닫기 (M)'), 'B모드': (_r_bmode, 2.0, '전투모드 해제 (A)'), 'T밴(거래차단)': (_r_tban, 2.0, '거래차단 해제 (X)'), 'restart 팝업': (_r_restart, 2.0, '팝업 클릭')}
 STOP_TRIGGERS = {'포만감 템 없음', '무게 꽉 참'}
 NOTIFY_TRIGGERS = {'친구 요청'}
 POPUP_CROP = (348, 322, 764, 452)
@@ -529,7 +524,7 @@ class Brain:
                 else:
                     self._log(f'배경 유사도 {sim:.2f}')
             self._prev_main = field
-    SUB_TRIGGERS = {'사망', '포만감 템 없음', '포만감 부족'}
+    SUB_TRIGGERS = {'사망', '포만감 템 없음'}
     SUB_MAIN_WAIT = 120.0
     def _sub_hands_for(self, hwnd: int, tag: str) -> Hands:
         self._sub_hands = {h: v for h, v in self._sub_hands.items() if win32gui.IsWindow(h)}
@@ -599,13 +594,6 @@ class Brain:
                             hands.click(557, 440, wait=True)
                             time.sleep(1.0)
                             hands.combo('alt', '2', wait=True)
-                        if '포만감 부족' in fired:
-                            self._log(f'[{tag}] 포만감 부족 → Alt+{_food_key()}')
-                            hands.combo('alt', _food_key(), wait=True)
-                            time.sleep(0.5)
-                            img2 = grab_hwnd(hwnd)
-                            if img2 is not None and '포만감 템 없음' in vis.check_triggers(img2):
-                                    self._stop_bot(f'{tag} 포만감 템 없음')
                     if self._sub_solving:
                         continue
                     else:
@@ -1147,6 +1135,123 @@ class Brain:
             else:
                 if self.hands.click(*target, button='left', wait=True):
                     self._log(f'{self.monster}: 다시하기 후 이동 {target}')
+    def _park_cursor(self):
+        self.hands.move(730, 580, wait=True)   # below the 가방 window: hover only, no tooltip over the cells
+        time.sleep(0.35)
+    def _close_inventory(self) -> bool:
+        for attempt in range(3):
+            f = self._grab_main()
+            if f is not None and not vis.inventory_open(f):
+                return True
+            if attempt == 0:
+                self.hands.press('i', hold=0.12, wait=True)
+            else:
+                self.hands.click(730, 543, 'left', wait=True)   # 창닫기
+            time.sleep(0.7)
+        f = self._grab_main()
+        ok = f is not None and not vis.inventory_open(f)
+        if not ok:
+            self._log('[포만감] 가방 창 닫기 실패 — 수동 확인 필요')
+        return ok
+    def _eat_to_full(self) -> bool:
+        """Open 가방, right-click row 1 / column 2 (궁중 타락죽) until the gauge is full, close 가방."""
+        f = self._grab_main()
+        if f is None or vis.chat_hangul_state(f) != 'inactive':
+            return False
+        start = vis.food_fraction(f)
+        if start is None:
+            return False
+        if not vis.inventory_open(f):
+            for _ in range(2):
+                self.hands.press('i', hold=0.12, wait=True)
+                time.sleep(0.8)
+                f = self._grab_main()
+                if f is not None and vis.inventory_open(f):
+                    break
+            else:
+                self._log('[포만감] 가방 열기 실패 — 먹지 않음')
+                return False
+        self._park_cursor()
+        f = self._grab_main()
+        if f is None or not vis.porridge_in_r1c2(f):
+            self._log('[포만감] 가방 1행 2열이 궁중 타락죽이 아님 — 아무것도 누르지 않음')
+            self._close_inventory()
+            return False
+        prev, stalls, eaten = start, 0, 0
+        why = '최대'
+        for _ in range(16):
+            if not self.running:
+                why = '정지'
+                break
+            self.hands.click(vis.INV_CELL_R1C2[0], vis.INV_CELL_R1C2[1], 'right', wait=True)
+            eaten += 1
+            time.sleep(0.5)
+            self._park_cursor()
+            f = self._grab_main()
+            frac = vis.food_fraction(f) if f is not None else None
+            if frac is None:
+                why = '게이지 확인불가'
+                break
+            if frac >= 0.93:
+                break
+            if not vis.porridge_in_r1c2(f):
+                why = '궁중 타락죽 소진'
+                break
+            if frac <= prev + 0.01:
+                stalls += 1
+                if stalls >= 2:
+                    why = '게이지가 늘지 않음'
+                    break
+            else:
+                stalls = 0
+            prev = frac
+        self._close_inventory()
+        end = vis.food_fraction(self._grab_main())
+        fmt = lambda v: 'n/a' if v is None else f'{v * 100:.0f}%'
+        self._log(f'[포만감] 궁중 타락죽 {eaten}개 사용: {fmt(start)} → {fmt(end)} ({why})')
+        return True
+    def _revive_dead_mercs(self, frame) -> bool:
+        """Dead 용병 (portrait without HP bar) before the next fight: Alt+1, then Alt+2 (반계탕)."""
+        dead = vis.dead_mercs(frame)
+        if not dead:
+            return False
+        now = time.time()
+        if now - getattr(self, '_revive_at', 0.0) < 15.0:
+            return False
+        hist = [t for t in getattr(self, '_revive_hist', []) if now - t < 600.0]
+        if len(hist) >= 4:
+            if now - getattr(self, '_revive_cap_log', 0.0) > 120.0:
+                self._revive_cap_log = now
+                self._log(f'[용병] 죽은 용병 {dead} — 10분 내 부활 4회 한도 도달, 건너뜀 (반계탕 확인)')
+            return False
+        hist.append(now)
+        self._revive_hist = hist
+        self._revive_at = now
+        self._log(f'[용병] 죽은 용병 슬롯 {dead} — Alt+1, Alt+2 부활')
+        self.hands.combo('alt', '1', wait=True)
+        time.sleep(0.5)
+        self.hands.combo('alt', '2', wait=True)
+        time.sleep(1.2)
+        left = vis.dead_mercs(self._grab_main())
+        self._log('[용병] 부활 후 남은 사망 슬롯: ' + (str(left) if left else '없음'))
+        return True
+    def _prefight(self, frame) -> bool:
+        """Everything that must be true right before a fight. True = a long action ran, so the
+        caller should re-detect the mob instead of clicking a stale position."""
+        cfg = config.load()
+        if frame is None:
+            return False
+        if cfg.get('prefight_revive', True) and self._revive_dead_mercs(frame):
+            return True
+        if cfg.get('prefight_food', True):
+            frac = vis.food_fraction(frame)
+            if frac is not None and frac < vis.FOOD_LOW_FRAC and time.time() - getattr(self, '_eat_at', 0.0) > 30.0:
+                self._eat_at = time.time()
+                self._log(f'[포만감] {frac * 100:.0f}% (1/5 미만) — 궁중 타락죽으로 채움')
+                if self._eat_to_full():
+                    return True
+        self._ensure_battle_modes(frame)
+        return False
     # 전투모드 (hotkey A) and 거래차단 (hotkey X) indicator signatures, measured live on a native
     # 1024x768 frame (see vision.TRIGGERS comment): (box, on_sum, off_sum). Any other sum = unknown,
     # and unknown is never toggled.
@@ -1709,7 +1814,8 @@ class Brain:
                                                                             pick = None
                                                                     if pick:
                                                                         x, y, dist = pick
-                                                                        self._ensure_battle_modes(img)
+                                                                        if self._prefight(img):
+                                                                            continue
                                                                         self.hands.click(int(x), int(y), 'right')
                                                                         self._moved_at = time.time()
                                                                         self._battle_click = -detector.click_cooldown(dist)
