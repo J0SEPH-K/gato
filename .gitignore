@@ -11,3 +11,8 @@ snapshots/
 dist/
 build/
 .venv/
+dist/
+dist-installer/
+build/
+installer/vc_redist.x64.exe
+*.spec.bak

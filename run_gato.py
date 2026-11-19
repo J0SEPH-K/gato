@@ -12,6 +12,14 @@ MIN_PY = (3, 11)
 
 def _fail(msg: str) -> None:
     print("ERROR: " + msg)
+    if os.name == "nt":
+        # The packaged app has no console: show the reason instead of exiting silently.
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, msg, "GATO", 0x10)
+        except Exception:
+            pass
     sys.exit(1)
 
 
@@ -136,7 +144,64 @@ def _seed_settings() -> None:
         print("First run: created prism_settings.json from defaults.")
 
 
+def _selftest() -> int:
+    """`Gato.exe --selftest`: import every heavy dependency and run one model inference, write
+    selftest.txt next to the app, exit 0/1. Proves a packaged build is complete without the GUI."""
+    import time
+    import traceback
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    out = []
+    ok = True
+
+    def step(name, fn):
+        nonlocal ok
+        t0 = time.time()
+        try:
+            r = fn()
+            out.append("PASS %-22s %.1fs %s" % (name, time.time() - t0, r if r is not None else ""))
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            out.append("FAIL %-22s %s: %s" % (name, type(e).__name__, e))
+            out.append(traceback.format_exc(limit=3))
+
+    step("frozen", lambda: "yes" if getattr(sys, "frozen", False) else "no (running from source)")
+    for mod in ("numpy", "cv2", "torch", "torchvision", "ultralytics", "win32gui", "win32api", "webview",
+                "windows_capture", "psutil", "scapy.all", "websockets", "cryptography"):
+        step("import " + mod, lambda m=mod: __import__(m) and None)
+    for mod in ("config", "vision", "detector", "capture", "input", "combat", "brain", "prism"):
+        step("module " + mod, lambda m=mod: __import__(m) and None)
+
+    def _yolo():
+        import numpy as np
+        from ultralytics import YOLO
+
+        path = os.path.join(here, "assets", "models", "jochul", "jochul.pt")
+        m = YOLO(path)
+        m.predict(source=np.zeros((512, 512, 3), dtype=np.uint8), imgsz=512, verbose=False)
+        return os.path.basename(path)
+
+    step("yolo model + predict", _yolo)
+
+    def _assets():
+        import config
+
+        missing = [p for p in (config.JOCHUL_MODEL, config.TEXT_MODEL) if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError(", ".join(missing))
+        return "models present"
+
+    step("assets", _assets)
+    step("ui", lambda: os.path.getsize(os.path.join(here, "ui", "index.html")))
+    out.append("RESULT " + ("ALL PASS" if ok else "FAILED"))
+    with open(os.path.join(here, "selftest.txt"), "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    return 0 if ok else 1
+
+
 def main() -> None:
+    if "--selftest" in sys.argv:
+        sys.exit(_selftest())
     print("GATO launcher: running preflight checks...")
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _seed_settings()
