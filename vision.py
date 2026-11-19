@@ -256,7 +256,7 @@ class Vision:
         # push from a stale local copy silently dropped it; keep this in the
         # repo, not just pushed ad hoc, so it survives future pushes.
         try:
-            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gato_debug.log')
+            path = os.path.join(__import__('config').BASE_DIR, 'gato_debug.log')
             with open(path, 'a', encoding='utf-8') as f:
                 f.write(f"{time.strftime('%H:%M:%S')} [{kind}] {text}\n")
         except Exception:

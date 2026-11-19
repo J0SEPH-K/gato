@@ -136,8 +136,10 @@ def _seed_settings() -> None:
     """First run: copy settings.default.json -> prism_settings.json (never overwrite)."""
     import shutil
 
+    import config
+
     here = os.path.dirname(os.path.abspath(__file__))
-    live = os.path.join(here, "prism_settings.json")
+    live = os.path.join(config.BASE_DIR, "prism_settings.json")
     default = os.path.join(here, "settings.default.json")
     if not os.path.exists(live) and os.path.exists(default):
         shutil.copyfile(default, live)
@@ -194,7 +196,9 @@ def _selftest() -> int:
     step("assets", _assets)
     step("ui", lambda: os.path.getsize(os.path.join(here, "ui", "index.html")))
     out.append("RESULT " + ("ALL PASS" if ok else "FAILED"))
-    with open(os.path.join(here, "selftest.txt"), "w", encoding="utf-8") as f:
+    import config as _c
+
+    with open(os.path.join(_c.BASE_DIR, "selftest.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
     return 0 if ok else 1
 

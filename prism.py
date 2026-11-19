@@ -1040,7 +1040,7 @@ if __name__ == '__main__':
     except Exception:
         import traceback
         txt = traceback.format_exc()
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prism_crash.log'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(config.BASE_DIR, 'prism_crash.log'), 'w', encoding='utf-8') as f:
             f.write(txt)
         if _API is not None:
             try:

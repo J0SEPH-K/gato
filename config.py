@@ -10,12 +10,18 @@ import math
 import os
 import tempfile
 import threading
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RES_DIR = os.path.dirname(os.path.abspath(__file__))   # read-only program files (assets, models, ui)
+if getattr(__import__('sys'), 'frozen', False):
+    # Installed app (Program Files is not writable): settings, logs and debug frames go to a user dir
+    BASE_DIR = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'GATO')
+    os.makedirs(BASE_DIR, exist_ok=True)
+else:
+    BASE_DIR = RES_DIR
 SETTINGS_PATH = os.path.join(BASE_DIR, 'prism_settings.json')
-MODEL_DIR = os.path.join(BASE_DIR, 'assets', 'models', 'monster')
-PORTRAIT_DIR = os.path.join(BASE_DIR, 'assets', 'imgs', 'monster')
-JOCHUL_MODEL = os.path.join(BASE_DIR, 'assets', 'models', 'jochul', 'jochul.pt')
-TEXT_MODEL = os.path.join(BASE_DIR, 'assets', 'models', 'text', 'best.pth')
+MODEL_DIR = os.path.join(RES_DIR, 'assets', 'models', 'monster')
+PORTRAIT_DIR = os.path.join(RES_DIR, 'assets', 'imgs', 'monster')
+JOCHUL_MODEL = os.path.join(RES_DIR, 'assets', 'models', 'jochul', 'jochul.pt')
+TEXT_MODEL = os.path.join(RES_DIR, 'assets', 'models', 'text', 'best.pth')
 BATTLE_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'battle')
 DIGIT_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'digits')
 AIM_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'aim')

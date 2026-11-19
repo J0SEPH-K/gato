@@ -1,7 +1,7 @@
 # Builds dist-installer\GatoSetup.exe (one-file installer) from this repo. Run in an ADMIN PowerShell:
 #   powershell -ExecutionPolicy Bypass -File build_windows.ps1
 # Needs: install.ps1 already run once (creates .venv). Downloads Inno Setup + the VC++ runtime if missing.
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'   # native tools write progress to stderr; exit codes are checked explicitly
 Set-Location -Path $PSScriptRoot
 $py = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw 'Run install.ps1 first (creates .venv).' }
@@ -17,7 +17,7 @@ if (-not (Test-Path 'dist\Gato\Gato.exe')) { throw 'dist\Gato\Gato.exe missing' 
 
 Write-Host '== self-test of the packaged app =='
 $st = Start-Process -FilePath 'dist\Gato\Gato.exe' -ArgumentList '--selftest' -Wait -PassThru
-Get-Content 'dist\Gato\_internal\selftest.txt' -ErrorAction SilentlyContinue
+Get-Content "$env:LOCALAPPDATA\GATO\selftest.txt" -ErrorAction SilentlyContinue
 if ($st.ExitCode -ne 0) { throw 'packaged self-test failed (see selftest.txt above)' }
 
 if (-not (Test-Path 'installer\vc_redist.x64.exe')) {
