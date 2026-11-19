@@ -406,21 +406,27 @@ MERC_BAR_ROWS = tuple(35 + 41 * i for i in range(12))   # red HP bar rows of the
 MERC_BAR_X = (4, 84)
 
 
+def _merc_has_bar(img: np.ndarray, y0: int) -> bool:
+    """Red HP bar present in the slot's bar row: 2 of 3 consecutive rows with >= 4 red pixels
+    (searched +-9 px because the selection frame shifts one slot). Any HP above ~5% shows, a dead
+    merc shows none, and portrait art rarely produces a 3-row red streak."""
+    for y in range(y0 - 9, y0 + 12):
+        band = img[y:y + 3, 6:88].astype(np.int16)
+        red = (band[..., 2] > 140) & (band[..., 1] < 70) & (band[..., 0] < 70)
+        if int((red.sum(axis=1) >= 4).sum()) >= 2:
+            return True
+    return False
+
+
 def dead_mercs(img: np.ndarray) -> list:
     """1-based portrait slots whose portrait is shown but whose red HP bar is gone (= dead)."""
     if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
         return []
     dead = []
     for i, y0 in enumerate(MERC_BAR_ROWS):
-        best, by = 0, y0
-        for y in range(y0 - 9, y0 + 12):
-            band = img[y:y + 3, MERC_BAR_X[0]:MERC_BAR_X[1]].astype(np.int16)
-            red = int(((band[..., 2] > 140) & (band[..., 1] < 70) & (band[..., 0] < 70)).sum())
-            if red > best:
-                best, by = red, y
-        if best >= 12:
-            continue          # has an HP bar -> alive
-        port = img[max(0, by - 34):by - 1, 6:80]
+        if _merc_has_bar(img, y0):
+            continue          # alive
+        port = img[max(0, y0 - 34):y0 - 1, 6:80]
         gray = cv2.cvtColor(port, cv2.COLOR_BGR2GRAY)
         if gray.mean() >= 38 and gray.std() >= 18:     # a portrait is there (not an empty panel)
             dead.append(i + 1)

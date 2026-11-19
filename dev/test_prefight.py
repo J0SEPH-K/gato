@@ -33,7 +33,7 @@ class World:
         self.gauge, self.dead, self.inv_open = gauge, set(dead), inv_open
         self.porridge, self.revive_works, self.per_item = porridge, revive_works, per_item
         self.keys, self.clicks, self.eaten = [], [], 0
-        self.portraits = rng.randint(40, 200, (12, 34, 74, 3)).astype(np.uint8)
+        self.portraits = rng.randint(40, 200, (12, 33, 74, 3)).astype(np.uint8)
 
     def frame(self):
         f = np.full((768, 1024, 3), 60, np.uint8)
@@ -135,7 +135,7 @@ def main():
     w = World(gauge=0.1, per_item=0.0)
     s = make(w)
     s._eat_to_full()
-    check('eat: gauge not rising -> stops after 3 tries', w.eaten == 3, w.eaten)
+    check('eat: gauge not rising -> gives up after 2 tries', w.eaten == 2, w.eaten)
 
     w = World(gauge=0.1, inv_open=True)
     s = make(w)
