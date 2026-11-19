@@ -29,9 +29,11 @@ ICO = cv2.imread(os.path.join(ROOT, 'assets', 'ui_templates', 'porridge_icon.png
 
 
 class World:
-    def __init__(self, gauge=0.1, dead=(), inv_open=False, porridge=True, revive_works=True, per_item=0.075, nobar=()):
+    def __init__(self, gauge=0.1, dead=(), inv_open=False, porridge=True, revive_works=True, per_item=0.075, nobar=(), empty=(), alt1=True, alt2=True):
         self.gauge, self.dead, self.inv_open = gauge, set(dead), inv_open
         self.nobar = set(nobar)
+        self.empty = set(empty)
+        self.alt1, self.alt2 = alt1, alt2
         self.porridge, self.revive_works, self.per_item = porridge, revive_works, per_item
         self.keys, self.clicks, self.eaten = [], [], 0
         self.portraits = np.repeat(rng.randint(40, 200, (12, 33, 74, 1)), 3, axis=3).astype(np.uint8)   # textured like a face
@@ -52,11 +54,15 @@ class World:
         f[669, 150] = 0
         f[670:678, 236] = (5, 5, 6)
         for i, y0 in enumerate(vis.MERC_BAR_ROWS):
+            if (i + 1) in self.empty:
+                continue                                    # no unit: field shows through, no gauges
             f[y0 - 34:y0 - 1, 6:80] = self.portraits[i]
             if (i + 1) in self.dead:
                 f[y0 - 34:y0 - 1, 6:80] = (self.portraits[i] * 0.45).astype(np.uint8)
+                f[y0 - 1:y0 + 11, 8:76] = (20, 20, 20)      # dark band, no HP/mana gauge
             elif (i + 1) not in self.nobar:
-                f[y0:y0 + 3, 6:78] = (40, 40, 200)
+                f[y0:y0 + 3, 6:78] = (40, 40, 200)          # red HP gauge
+                f[y0 + 6:y0 + 9, 6:78] = (170, 120, 90)     # blue mana gauge
         if self.inv_open:
             x, y = vis.INV_HEADER_XY
             f[y:y + HDR.shape[0], x:x + HDR.shape[1]] = HDR
@@ -77,7 +83,7 @@ class Hands:
 
     def combo(self, *k, **kw):
         self.w.keys.append('+'.join(k))
-        if self.w.revive_works and k == ('alt', '2'):
+        if self.w.revive_works and ((k == ('alt', '1') and self.w.alt1) or (k == ('alt', '2') and self.w.alt2)):
             self.w.dead.clear()
 
     def click(self, x, y, button='left', **kw):
@@ -97,9 +103,12 @@ def make(world, learn=True):
     s.hands, s.running, s.logs = Hands(world), True, []
     s._log = s.logs.append
     s._grab_main = world.frame
-    for n in ('_park_cursor', '_close_inventory', '_eat_to_full', '_update_merc_baseline', '_revive_dead_mercs', '_prefight', '_ensure_battle_modes', '_mode_state'):
+    for n in ('_merc_occupied', '_park_cursor', '_close_inventory', '_eat_to_full', '_eat_to_full_inner', '_update_merc_baseline', '_revive_dead_mercs', '_prefight', '_ensure_battle_modes', '_mode_state'):
         setattr(s, n, types.MethodType(getattr(brain.Brain, n), s))
     s._MODE_SIGS = brain.Brain._MODE_SIGS
+    s._MERC_FILE = os.path.join(os.environ.get('TEMP', '/tmp'), 'gato_test_merc_slots.json')
+    s._merc_occupied = types.MethodType(brain.Brain._merc_occupied, s)
+    s._merc_occ = set()
     if learn:
         s._update_merc_baseline(world.frame_alive())   # what the 5 s background loop does while all are alive
     return s
@@ -117,10 +126,8 @@ def main():
     w = World(gauge=0.1, dead=(3, 8))
     f = w.frame()
     check('food_fraction reads 10%', abs(vis.food_fraction(f) - 0.1) < 0.02, vis.food_fraction(f))
-    base = {s: m for s, bar, m in vis.merc_slots(w.frame_alive())}
-    check('dead_mercs_vs finds slots 3 and 8', vis.dead_mercs_vs(f, base) == [3, 8], vis.dead_mercs_vs(f, base))
-    check('dead_mercs_vs: no baseline -> never dead', vis.dead_mercs_vs(f, {}) == [])
-    check('no dead mercs when all have bars', vis.dead_mercs_vs(World().frame(), base) == [])
+    check('dead_mercs_v2 finds slots 3 and 8', vis.dead_mercs_v2(f) == [3, 8], vis.dead_mercs_v2(f))
+    check('no dead mercs when all have gauges', vis.dead_mercs_v2(World().frame()) == [])
     check('inventory_open false when closed', not vis.inventory_open(f))
     check('inventory_open true when open', vis.inventory_open(World(inv_open=True).frame()))
     check('food_fraction None when gauge absent', vis.food_fraction(np.full((768, 1024, 3), 90, np.uint8)) is None)
@@ -165,7 +172,7 @@ def main():
     w = World(gauge=0.9, dead=(2,))
     s = make(w)
     acted = s._prefight(w.frame())
-    check('revive: dead merc -> Alt+1 then Alt+2, nothing else', w.keys == ['alt+1', 'alt+2'], w.keys)
+    check('revive: dead merc -> ONE Alt+1 only (it revives everyone)', w.keys == ['alt+1'], w.keys)
     check('revive: reported as acted (skip stale click)', acted is True)
     check('revive: mercs alive afterwards', not w.dead)
 
@@ -179,7 +186,7 @@ def main():
     for _ in range(6):
         s._revive_at = 0.0
         s._revive_dead_mercs(w.frame())
-    check('revive: capped at 4 tries per 10 min when it keeps failing', w.keys.count('alt+1') == 4, w.keys.count('alt+1'))
+    check('revive: capped at 3 tries per 10 min when it keeps failing', w.keys.count('alt+1') == 3, w.keys.count('alt+1'))
 
     w = World(gauge=0.9, dead=(2,), revive_works=False)
     s = make(w)
@@ -187,27 +194,49 @@ def main():
     s._revive_dead_mercs(w.frame())
     check('revive: 15 s cooldown between tries', w.keys.count('alt+1') == 1, w.keys)
 
-    # ---- no false Alt presses ----
-    w = World(gauge=0.9, dead=(2,))
-    s = make(w, learn=False)
-    s._prefight(w.frame())
-    check('guard: no baseline (never seen alive) -> no Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
-    w = World(gauge=0.9, nobar=(4,))
+    # ---- no false Alt presses / single press ----
+    w = World(gauge=0.9, dead=(2, 3, 5))
     s = make(w)
     s._prefight(w.frame())
-    check('guard: bar hidden but portrait not dimmed -> no Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
+    check('revive: 3 dead at once -> still exactly one Alt press', w.keys == ['alt+1'], w.keys)
+
+    w = World(gauge=0.9, dead=(2,), alt1=False)
+    s = make(w)
+    s._prefight(w.frame())
+    check('revive: Alt+1 not enough -> Alt+2 once, never both repeated', w.keys == ['alt+1', 'alt+2'], w.keys)
+
+    w = World(gauge=0.9, empty=(10, 11, 12))
+    s = make(w)
+    s._prefight(w.frame())
+    check('guard: empty slots at the bottom are not dead', not any(k.startswith('alt') for k in w.keys), w.keys)
+
+    w = World(gauge=0.9, nobar=tuple(range(1, 13)))
+    s = make(w)
+    s._prefight(w.frame())
+    check('guard: no gauge anywhere (window/loading) -> no Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
+
+    w = World(gauge=0.9, dead=(12,))
+    s = make(w, learn=True)          # slot 12 was seen alive while learning
+    w.dead = {12}
+    s._prefight(w.frame())
+    check('revive: last slot dead but known occupied -> revived', w.keys == ['alt+1'], w.keys)
+    w = World(gauge=0.9, dead=(12,))
+    s = make(w, learn=False)
+    s._merc_occ = set()
+    s._prefight(w.frame())
+    check('guard: last slot, never seen alive -> not guessed dead', not any(k.startswith('alt') for k in w.keys), w.keys)
+
     w = World(gauge=0.9)
     s = make(w)
     for _ in range(20):
         s._prefight(w.frame())
     check('guard: 20 passes with everyone alive -> zero Alt keys', not any(k.startswith('alt') for k in w.keys), w.keys)
-    check('guard: Alt keys appear nowhere in the eating routine', True)
 
     # ---- order: revive first, then food ----
     w = World(gauge=0.1, dead=(5,))
     s = make(w)
     first = s._prefight(w.frame())
-    check('order: revive runs before eating', w.keys == ['alt+1', 'alt+2'] and w.eaten == 0 and first, (w.keys, w.eaten))
+    check('order: revive runs before eating', w.keys == ['alt+1'] and w.eaten == 0 and first, (w.keys, w.eaten))
     s._prefight(w.frame())
     check('order: next pass eats', w.eaten > 0)
 

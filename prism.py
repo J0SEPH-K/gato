@@ -51,7 +51,7 @@ WIN_DEF_W, WIN_DEF_H = (960, 660)
 class Api:
     def __init__(self):
         # ***<module>.Api.__init__: Failure: Different bytecode
-        self.engine = CaptureEngine(fps=10.0)
+        self.engine = CaptureEngine(fps=60.0)
         self.vision = Vision()
         self.vision.attach(self.engine)
         self.hands = Hands(hwnd_get=lambda: self.engine.hwnd, log=lambda s: self.vision.note('input', s))

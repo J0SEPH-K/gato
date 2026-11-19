@@ -203,7 +203,8 @@ class BattleIO:
     def move(self, x, y):
         self._hands.move(int(x), int(y), wait=True)
 class Brain:
-    INTERVAL = 0.1
+    INTERVAL = 1.0 / 60.0   # loop pacing target; the loop actually waits for each NEW captured frame
+    TICK_UNITS = 0.1        # old 10 Hz loop period: loop-count constants are kept in these units
     def __init__(self, engine, vision, hands, note=print, notify=None, notify_img=None, report_battle=None, report_appear=None, on_stopped=None, banja_ok=None, no_battle_limit=None, debug_jochul=None, debug_jamun=None, debug_jamun_wrong=None, auth_id=None):
         self.engine = engine
         self.vision = vision
@@ -1007,11 +1008,13 @@ class Brain:
             self.sched_target = None
             f0 = self._grab_main()
             self._prev_main = f0[:vis.FIELD_H].copy() if f0 is not None else None
+            self.hands.guard_enabled = True
             self.running = True
             self._thread = threading.Thread(target=self._loop, daemon=True, name='prism-brain')
             self._thread.start()
     def stop(self):
         self.running = False
+        self.hands.guard_enabled = False
         self.rest_mode = False
         self.sched_target = None
         self.hands.clear_pending()
@@ -1132,6 +1135,40 @@ class Brain:
             else:
                 if self.hands.click(*target, button='left', wait=True):
                     self._log(f'{self.monster}: 다시하기 후 이동 {target}')
+    def _close_stray_window(self, img, scene, fired) -> bool:
+        """A window the macro did not open (the 용병 가방/status window from a portrait click)
+        hides the main HUD, the scene reads 'unknown' and nothing works. Close it with Esc
+        (then the 창닫기 button). True = a window is up, skip everything else this pass."""
+        if self._battle_running or self._sub_solving or getattr(self, '_macro_inv', False):
+            self._unk_since = 0.0
+            return False
+        now = time.time()
+        stray = vis.inventory_open(img)
+        if not stray:
+            if scene == 'unknown' and not fired:
+                if not getattr(self, '_unk_since', 0.0):
+                    self._unk_since = now
+                stray = now - self._unk_since >= 3.0
+            else:
+                self._unk_since = 0.0
+        if not stray:
+            self._stray_tries = 0
+            return False
+        if now - getattr(self, '_esc_at', 0.0) < 0.9:
+            return True
+        self._esc_at = now
+        self._stray_tries = getattr(self, '_stray_tries', 0) + 1
+        if self._stray_tries > 6:
+            if self._stray_tries == 7:
+                self._log('[창] 닫히지 않는 창 — 수동 확인 필요')
+            return True
+        if self._stray_tries % 3 == 0 and vis.inventory_open(img):
+            self._log('[창] 창닫기 클릭')
+            self.hands.click(730, 543, 'left', wait=True)
+        else:
+            self._log('[창] 예상치 못한 창 열림 — Esc로 닫음')
+            self.hands.press('esc', hold=0.08, wait=True)
+        return True
     def _park_cursor(self):
         self.hands.move(730, 580, wait=True)   # below the 가방 window: hover only, no tooltip over the cells
         time.sleep(0.35)
@@ -1152,6 +1189,12 @@ class Brain:
         return ok
     def _eat_to_full(self) -> bool:
         """Open 가방, right-click row 1 / column 2 (궁중 타락죽) until the gauge is full, close 가방."""
+        self._macro_inv = True
+        try:
+            return self._eat_to_full_inner()
+        finally:
+            self._macro_inv = False
+    def _eat_to_full_inner(self) -> bool:
         f = self._grab_main()
         if f is None or vis.chat_hangul_state(f) != 'inactive':
             return False
@@ -1207,26 +1250,43 @@ class Brain:
         fmt = lambda v: 'n/a' if v is None else f'{v * 100:.0f}%'
         self._log(f'[포만감] 궁중 타락죽 {eaten}개 사용: {fmt(start)} → {fmt(end)} ({why})')
         return True
+    _MERC_FILE = os.path.join(config.BASE_DIR, 'merc_slots.json')
+    def _merc_occupied(self) -> set:
+        occ = self.__dict__.get('_merc_occ')
+        if occ is None:
+            try:
+                with open(self._MERC_FILE, encoding='utf-8') as f:
+                    occ = {int(x) for x in json.load(f)}
+            except Exception:
+                occ = set()
+            self._merc_occ = occ
+        return occ
     def _learn_mercs(self) -> None:
-        if self._battle_running:
+        if self._battle_running or getattr(self, '_macro_inv', False):
             return
         f = self._grab_main()
-        if f is not None and vis.detect_scene(f) == 'main':
+        if f is not None and vis.detect_scene(f) == 'main' and not vis.inventory_open(f):
             self._update_merc_baseline(f)
     def _update_merc_baseline(self, frame) -> None:
-        """Remember each portrait slot's brightness while it shows an HP bar (= alive)."""
-        base = self.__dict__.setdefault('_merc_base', {})
-        for slot, bar, mean in vis.merc_slots(frame):
-            if bar:
-                base[slot] = mean if slot not in base else 0.9 * base[slot] + 0.1 * mean
+        """Remember which portrait slots held a live unit (persisted, so a restart with a dead
+        merc already on screen still knows that slot is occupied)."""
+        occ = self._merc_occupied()
+        new = set(vis.merc_alive_slots(frame)) - occ
+        if new:
+            occ |= new
+            try:
+                with open(self._MERC_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(sorted(occ), f)
+            except Exception:
+                pass
     def _revive_dead_mercs(self, frame) -> bool:
-        """Alt+1, then Alt+2 -- ONLY when a 용병 is dead: no HP bar AND a dimmed portrait versus its
-        own alive baseline, seen on two frames 0.4 s apart. Every press is logged with the slots
-        and a frame is saved to debug/revive/ so a wrong press can be audited."""
+        """A 용병 is dead when its portrait shows neither an HP nor a mana gauge. One Alt+1 revives
+        every dead unit at once; Alt+2 is pressed (once) only if one is still dead afterwards.
+        Confirmed on two frames 0.4 s apart; every press is logged and a frame saved."""
         if frame is None:
             return False
-        base = self.__dict__.setdefault('_merc_base', {})
-        dead = vis.dead_mercs_vs(frame, base)
+        occ = self._merc_occupied()
+        dead = vis.dead_mercs_v2(frame, occ)
         if not dead:
             return False
         now = time.time()
@@ -1234,20 +1294,20 @@ class Brain:
             return False
         time.sleep(0.4)
         fresh = self._grab_main()
-        dead = [d for d in dead if d in vis.dead_mercs_vs(fresh, base)] if fresh is not None else []
+        again = vis.dead_mercs_v2(fresh, occ) if fresh is not None else []
+        dead = [d for d in dead if d in again]
         if not dead:
             return False
         hist = [t for t in getattr(self, '_revive_hist', []) if now - t < 600.0]
-        if len(hist) >= 4:
+        if len(hist) >= 3:
             if now - getattr(self, '_revive_cap_log', 0.0) > 120.0:
                 self._revive_cap_log = now
-                self._log(f'[용병] 죽은 용병 {dead} — 10분 내 부활 4회 한도 도달, 건너뜀 (반계탕 확인)')
+                self._log(f'[용병] 죽은 용병 {dead} — 10분 내 부활 3회 한도 도달, 건너뜀 (반계탕 확인)')
             return False
         hist.append(now)
         self._revive_hist = hist
         self._revive_at = now
-        stats = {s: (round(m), round(base[s])) for s, bar, m in vis.merc_slots(fresh) if s in dead}
-        self._log(f'[용병] 죽은 용병 슬롯 {dead} (밝기 현재/평소 {stats}) — Alt+1, Alt+2')
+        self._log(f'[용병] 죽은 용병 슬롯 {dead} — Alt+1 한 번으로 전원 부활 시도')
         try:
             d = os.path.join(config.BASE_DIR, 'debug', 'revive')
             os.makedirs(d, exist_ok=True)
@@ -1256,10 +1316,13 @@ class Brain:
         except Exception:
             pass
         self.hands.combo('alt', '1', wait=True)
-        time.sleep(0.5)
-        self.hands.combo('alt', '2', wait=True)
-        time.sleep(1.2)
-        left = vis.dead_mercs_vs(self._grab_main(), base)
+        time.sleep(1.5)
+        left = vis.dead_mercs_v2(self._grab_main(), occ)
+        if left:
+            self._log(f'[용병] Alt+1 후에도 사망 슬롯 {left} — Alt+2 한 번')
+            self.hands.combo('alt', '2', wait=True)
+            time.sleep(1.5)
+            left = vis.dead_mercs_v2(self._grab_main(), occ)
         self._log('[용병] 부활 후 남은 사망 슬롯: ' + (str(left) if left else '없음'))
         return True
     def _prefight(self, frame) -> bool:
@@ -1712,8 +1775,11 @@ class Brain:
         _pending_kill = None
         while self.running:
             while True:
-                loop_n += 1
                 t0 = time.time()
+                units = min(5.0, (t0 - getattr(self, '_prev_loop_t', t0)) / self.TICK_UNITS)
+                self._prev_loop_t = t0
+                loop_n += units
+                _fid = self.engine._frame_id
                 img = self.engine.snapshot()
                 if img is None:
                     main_since = None
@@ -1794,7 +1860,7 @@ class Brain:
                                 self._no_battle_count = 0
                             else:
                                 if self._shutdown_at is None:
-                                    self._no_battle_count += 1
+                                    self._no_battle_count += units
                                     limit = self._nb_limit() or NO_BATTLE_LIMIT
                                     if self._no_battle_count >= limit:
                                         self._stop_bot(f'{limit}루프 전투 미진입 (팅 의심)')
@@ -1815,6 +1881,14 @@ class Brain:
                             mob_gate_sc = gate_sc * search_window.scale
                             if dummy_stacks and last_click_n is not None and (loop_n - last_click_n > detector.DUMMY_RESET_LOOPS):
                                         dummy_stacks = 0
+                            if self._close_stray_window(img, scene, fired):
+                                self.engine.wait_new(_fid, 0.05)
+                                continue
+                            if scene == 'main' and (not self._battle_running) and self._shutdown_at is None and time.time() - getattr(self, '_dead_chk_at', 0.0) >= 0.5:
+                                self._dead_chk_at = time.time()
+                                self._update_merc_baseline(img)
+                                if config.load().get('prefight_revive', True) and self._revive_dead_mercs(img):
+                                    continue
                             # NATAS gate probe (2026-11-17): once a second, name every click gate that is False, so a
                             # Start that never clicks says why instead of being guessed at. Remove once the bot fights.
                             if time.time() - getattr(self, '_gate_log_at', 0.0) >= 1.0:
@@ -1834,12 +1908,28 @@ class Brain:
                                                                         sprite_opts['allow_avoid2'] = main_since is not None and time.monotonic() - main_since >= detector.SPRITE_AVOID2_DELAY_SEC
                                                                     coords = self.detector.detect(img, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts)
                                                                     pick = detector.nearest_in_gate(coords, mob_gate_sc, center=detector.CENTER)
-                                                                    search_window.advance()
+                                                                    search_window.advance(units)
                                                                     if pick:
+                                                                        # Re-detect on the NEWEST frame and click where the mob is NOW:
+                                                                        # mobs walk, and the frame the pick came from is already old.
                                                                         fresh = self.engine.snapshot()
                                                                         if fresh is None or not combat.is_main(fresh):
                                                                             self._log('색적 결과 폐기 — 클릭 직전 화면 변경(연산 지연)')
                                                                             pick = None
+                                                                        else:
+                                                                            c2 = detector.drop_ui_points(self.detector.detect(fresh, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts))
+                                                                            near = None
+                                                                            if c2 is not None and c2.shape[0]:
+                                                                                dd = np.hypot(c2[:, 0] - pick[0], c2[:, 1] - pick[1])
+                                                                                j = int(np.argmin(dd))
+                                                                                if dd[j] <= 26.0:
+                                                                                    near = c2[j]
+                                                                            if near is None:
+                                                                                self._log('색적 결과 폐기 — 클릭 직전 재확인에서 대상 사라짐/이동')
+                                                                                pick = None
+                                                                            else:
+                                                                                pick = (float(near[0]), float(near[1]), float(detector.corrected_dist(near[None, :])[0]))
+                                                                                img = fresh
                                                                     if pick:
                                                                         x, y, dist = pick
                                                                         if self._prefight(img):
@@ -1870,5 +1960,5 @@ class Brain:
                                                             self.hands.click(int(x), int(y), 'left')
                                                             self._battle_click = -detector.COOLDOWN_LOOPS
                                                             self._log('상자 클릭')
-                            self._battle_click += 1
-                            time.sleep(max(0.0, self.INTERVAL - (time.time() - t0)))
+                            self._battle_click += units
+                            self.engine.wait_new(_fid, 0.03)

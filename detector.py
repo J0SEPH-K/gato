@@ -36,8 +36,10 @@ class SearchWindow:
         self.was_main = is_main
 
     
-    def advance(self):
-        self.age = min(SEARCH_EXPAND_FRAMES, self.age + 1)
+    def advance(self, n=1.0):
+        # n = elapsed time in 0.1 s units, so the search window grows at the same wall-clock
+        # speed whatever the loop rate is (it was 1 per loop when the loop ran at 10 Hz)
+        self.age = min(SEARCH_EXPAND_FRAMES, self.age + n)
 
     
     def reset(self):
@@ -508,8 +510,34 @@ def corrected_dist(coords):
     return np.sqrt(dx * dx + dy * dy)
 
 
+# Screen areas that are HUD, never ground: a click there opens a window or presses a button
+# (the 용병 portrait column opens that merc's 가방/status window, which freezes the macro).
+UI_BLOCK_RECTS = (
+    (0, 0, 100, 525),        # 용병 portraits + their HP bars
+    (0, 0, 350, 90),         # top-left stat box (shown on hover) and portrait 1
+    (100, 0, 665, 52),       # top toolbar icons
+    (820, 0, 1024, 205),     # minimap
+    (955, 355, 1024, 650),   # right-hand button column
+    (0, 555, 335, 700),      # Alt+1 / Alt+2 quick slots
+    (0, 640, 1024, 768),     # bottom HUD
+)
+
+
+def ui_blocked(x, y) -> bool:
+    return any(x0 <= x < x1 and y0 <= y < y1 for x0, y0, x1, y1 in UI_BLOCK_RECTS)
+
+
+def drop_ui_points(coords):
+    """Remove detections that sit on the HUD so the next-nearest real mob is picked instead."""
+    if coords is None or coords.shape[0] == 0:
+        return coords
+    keep = np.array([not ui_blocked(float(c[0]), float(c[1])) for c in coords], dtype=bool)
+    return coords[keep]
+
+
 def nearest_in_gate(coords, scale = 1.0, center = None):
-    if coords.shape[0] == 0:
+    coords = drop_ui_points(coords)
+    if coords is None or coords.shape[0] == 0:
         return None
     gx = (GATE_X[0] + GATE_X[1]) / 2.0
     gy = (GATE_Y[0] + GATE_Y[1]) / 2.0

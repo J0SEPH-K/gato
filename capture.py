@@ -225,7 +225,7 @@ def grab_hwnd_region(hwnd: int, x0: int, y0: int, x1: int, y1: int) -> 'np.ndarr
 
 class CaptureEngine:
     REFIND_INTERVAL = 1.0
-    def __init__(self, fps: float=10.0, process_name: str=PROCESS_NAME):
+    def __init__(self, fps: float=60.0, process_name: str=PROCESS_NAME):
         self.fps = fps
         self.process_name = process_name
         self._hwnd = 0
@@ -285,6 +285,12 @@ class CaptureEngine:
             else:
                 ok, enc = cv2.imencode('.jpg', self._frame_out, [cv2.IMWRITE_JPEG_QUALITY, quality])
         return enc.tobytes() if ok else None
+    def wait_new(self, last_id: int, timeout: float = 0.03) -> int:
+        """Block (1 ms steps) until a frame newer than last_id was published; returns the current id."""
+        end = time.perf_counter() + timeout
+        while self._frame_id == last_id and time.perf_counter() < end:
+            time.sleep(0.001)
+        return self._frame_id
     def stats(self) -> dict:
         now = time.perf_counter()
         times = [t for t in self._times if now - t <= 3.0]

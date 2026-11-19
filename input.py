@@ -18,6 +18,10 @@ import win32process
 from capture import find_window, REF_W, REF_H
 
 user32 = ctypes.windll.user32
+try:
+    ctypes.windll.winmm.timeBeginPeriod(1)   # 1 ms timer: 60 Hz loops and 4 ms cursor checks need it
+except Exception:
+    pass
 def is_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -96,8 +100,13 @@ class Hands:
         self._q = queue.Queue()
         self._mouse_held = None
         self._fg_at = 0.0
+        self._pin = None             # (screen_x, screen_y, expires_monotonic): where the cursor must stay
+        self.guard_enabled = False   # set by Brain while the macro runs
+        self.guard_fixes = 0         # times the guard pulled a drifting cursor back
         self._thread = threading.Thread(target=self._worker, daemon=True, name='prism-hands')
         self._thread.start()
+        self._guard_thread = threading.Thread(target=self._guard_loop, daemon=True, name='prism-cursor-guard')
+        self._guard_thread.start()
     def _worker(self):
         # ***<module>.Hands._worker: Failure: Different control flow
         while True:
@@ -111,6 +120,34 @@ class Hands:
             finally:
                 if done is not None:
                     done.set()
+    PIN_TTL = 2.5
+
+    def _set_pin(self, sx: int, sy: int) -> None:
+        self._pin = (sx, sy, time.monotonic() + self.PIN_TTL)
+
+    def _touch_pin(self) -> None:
+        pin = self._pin
+        if pin is not None:
+            self._pin = (pin[0], pin[1], time.monotonic() + self.PIN_TTL)
+
+    def _guard_loop(self) -> None:
+        """Keeps the cursor on the last commanded point while the macro is acting. If the real
+        mouse (or anything else) moves it, it is put back within ~5 ms, so a cast or click never
+        lands where the cursor drifted to."""
+        pt = ctypes.wintypes.POINT()
+        while True:
+            time.sleep(0.004)
+            pin = self._pin
+            if pin is None or not self.guard_enabled:
+                continue
+            if time.monotonic() > pin[2]:
+                self._pin = None
+                continue
+            user32.GetCursorPos(ctypes.byref(pt))
+            if pt.x != pin[0] or pt.y != pin[1]:
+                user32.SetCursorPos(pin[0], pin[1])
+                self.guard_fixes += 1
+
     def _do(self, fn, wait: bool):
         if not wait:
             self._q.put((fn, None, [None]))
@@ -192,7 +229,11 @@ class Hands:
                 return False
             else:
                 sx, sy = self._to_screen(hwnd, x, y)
-                return self._land(sx, sy)
+                self._pin = None
+                ok = self._land(sx, sy)
+                if ok:
+                    self._set_pin(sx, sy)
+                return ok
         return self._do(_fn, wait)
     def move_nofg(self, x, y, wait=False):
         def _fn():
@@ -226,9 +267,11 @@ class Hands:
                 sx, sy = self._to_screen(hwnd, x, y)
                 nx, ny = _abs_xy(sx, sy)
                 absf = _M_ABSOLUTE | _M_VIRTUALDESK
+                self._pin = None
                 if not self._land(sx, sy):
                     self._log(f'클릭 스킵 — 커서 안착 실패 ({sx},{sy})')
                     return False
+                self._set_pin(sx, sy)            # guard holds the cursor here through the click
                 _mouse_event(_M_MOVE | absf, nx, ny)
                 time.sleep(0.012)
                 if not self._land(sx, sy):
@@ -270,6 +313,7 @@ class Hands:
         return self._do(_fn, wait)
     def press(self, key, hold=0.05, wait=False):
         def _fn():
+            self._touch_pin()
             if not self._foreground():
                 return False
             else:
@@ -278,6 +322,7 @@ class Hands:
         return self._do(_fn, wait)
     def key_hold(self, key, wait=False):
         def _fn():
+            self._touch_pin()
             if not self._foreground():
                 return False
             else:
@@ -356,6 +401,7 @@ class Hands:
         except queue.Empty:
             return None
     def release_all(self):
+        self._pin = None
         self.clear_pending()
         if self._mouse_held:
             self.mouse_release(wait=True)

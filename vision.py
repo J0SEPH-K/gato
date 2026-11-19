@@ -478,12 +478,47 @@ def merc_slots(img: np.ndarray) -> list:
     return out
 
 
-MERC_DEAD_RATIO = 0.8
+def merc_gauge(img: np.ndarray, y0: int):
+    """(red_px, blue_px) of the HP and mana gauges in the slot's bar band (searched +-9 rows,
+    the selection frame shifts the lower slots by a few pixels)."""
+    best = (0, 0)
+    for y in range(y0 - 9, y0 + 12):
+        band = img[y:y + 12, 8:76].astype(np.int16)
+        b, g, r = band[..., 0], band[..., 1], band[..., 2]
+        red = int(((r > 140) & (g < 70) & (b < 70)).sum())
+        blue = int(((b > 120) & (r < 130) & (b - r > 25)).sum())
+        if red + blue > best[0] + best[1]:
+            best = (red, blue)
+    return best
 
 
-def dead_mercs_vs(img: np.ndarray, base: dict) -> list:
-    """Dead = no HP bar AND the portrait is dimmed (<= 80%) versus that slot's own brightness
-    when it was last seen alive. A slot that was never seen alive is never called dead, so an
-    empty slot or a hidden bar cannot trigger a revive."""
-    return [slot for slot, bar, mean in merc_slots(img)
-            if not bar and slot in base and mean <= MERC_DEAD_RATIO * base[slot]]
+MERC_GAUGE_MIN = 20     # alive units show >= ~200 red and ~200 blue px; a dead one shows 0 of both
+
+
+def merc_alive_slots(img: np.ndarray) -> list:
+    """Slots that show an HP or mana gauge (= a live unit)."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    out = []
+    for i, y0 in enumerate(MERC_BAR_ROWS):
+        red, blue = merc_gauge(img, y0)
+        if red >= MERC_GAUGE_MIN or blue >= MERC_GAUGE_MIN:
+            out.append(i + 1)
+    return out
+
+
+def dead_mercs_v2(img: np.ndarray, occupied=()) -> list:
+    """Dead 용병 = a slot with NO HP gauge and NO mana gauge that still holds a unit.
+    Held = a live unit sits in a lower slot (units fill the column from the top, so a gap above a
+    live one is a dead one), or the slot was seen alive earlier (`occupied`, persisted)."""
+    alive = merc_alive_slots(img)
+    if not alive:
+        return []          # no gauge anywhere: window covered, loading, or the wrong screen
+    last_alive = max(alive)
+    out = []
+    for slot in range(1, 13):
+        if slot in alive:
+            continue
+        if slot < last_alive or slot in occupied:
+            out.append(slot)
+    return out

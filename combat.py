@@ -532,6 +532,7 @@ def _attack(io, x, y, hold_sec, stop = None, keys = None):
         ATTACK_TAIL]
     io.move(x, y)
     time.sleep(MOVE_SETTLE_S)
+    io.move(x, y)   # land + verify again right before the casts (the guard also pins it)
     for k in seq:
         io.press('r', KEY_HOLD_S)
         time.sleep(KEY_GAP_S)
@@ -539,6 +540,7 @@ def _attack(io, x, y, hold_sec, stop = None, keys = None):
         time.sleep(KEY_GAP_S)
     io.press(ATTACK_FINISH, KEY_HOLD_S)
     time.sleep(KEY_GAP_S)
+    io.move(x, y)
     if HOLD_AS_WAIT:
         end = time.time() + max(0.0, float(hold_sec))
         while time.time() < end:
