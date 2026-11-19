@@ -37,6 +37,11 @@ settings and is git-ignored; never commit it.
     docs/            install guide (KR), remote spec
     dev/             macOS UI preview, PyInstaller spec
 
+## Self-tests (on the Windows PC)
+
+    .venv\Scripts\python dev\selftest_click.py   # click delivery, landing error, latency (own test window)
+    .venv\Scripts\python dev\smoke_start.py 45    # starts the real loop headless against the running game, then stops
+
 ## Troubleshooting
 
 - Log: `gato_traceback.log` in the install folder.
