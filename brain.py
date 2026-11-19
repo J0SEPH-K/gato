@@ -288,6 +288,7 @@ class Brain:
             try:
                 self._ensure_window_visible()
                 self._check_idle_warning()
+                self._check_revive_popup()
                 if False and time.time() - max(self._moved_at, self._battle_at) >= self.AFK_SEC and not self._afk_busy():
                     # DISABLED (manager, 2026-11-19): confirmed live, twice,
                     # that this nudge's right-click reliably lands on a map
@@ -736,22 +737,42 @@ class Brain:
             except Exception:
                 self._gato_pid_cached = False
             return self._gato_pid_cached
-    def _revive_mercs(self) -> bool:
-        """After a fight, use the two revive items (Alt+1, Alt+2) once. True = handled here."""
-        if not config.load().get('merc_revive', True):
-            return False
+    def _check_revive_popup(self) -> bool:
+        """Click 확인 on the 불사신부 popup (a merc or the character died). Never clicks an
+        unrecognised confirm dialog; saves it to debug/dialog_unknown instead."""
         frame = self._grab_main()
-        if frame is None or not combat.is_main(frame):
-            self._log('용병 부활 스킵 — 메인 화면 아님')
-            return True
-        self._log('용병 부활 시도 (Alt+1, Alt+2)')
-        self.hands.combo('alt', '1')
-        time.sleep(0.4)
-        self.hands.combo('alt', '2')
+        if frame is None:
+            return False
+        found = vis.find_revive_popup(frame)
+        if found is None:
+            return False
+        kind, pt = found
+        if kind == 'unknown':
+            if time.time() - getattr(self, '_unk_dlg_at', 0.0) >= 60.0:
+                self._unk_dlg_at = time.time()
+                try:
+                    d = os.path.join(config.BASE_DIR, 'debug', 'dialog_unknown')
+                    os.makedirs(d, exist_ok=True)
+                    if len(os.listdir(d)) < 20:
+                        cv2.imwrite(os.path.join(d, time.strftime('%H%M%S') + '.png'), frame)
+                except Exception:
+                    pass
+                self._log('[팝업] 확인/취소 팝업 문구 불일치 — 클릭 안 함 (debug/dialog_unknown 저장)')
+            return False
+        clicks = [t for t in getattr(self, '_revive_clicks', []) if time.time() - t < 10.0]
+        if len(clicks) >= 3:
+            return False
+        clicks.append(time.time())
+        self._revive_clicks = clicks
+        self.hands.click(pt[0], pt[1], 'left', wait=True)
+        time.sleep(0.6)
+        self._moved_at = time.time()
+        self._log('[부활] 불사신부 사용 팝업 — 확인 클릭')
         return True
     def _delayed_merc_check(self):
         time.sleep(1.0)
-        ui_ok = self._revive_mercs() or self._check_merc_deaths_ui()
+        self._check_revive_popup()
+        ui_ok = self._check_merc_deaths_ui()
         prev_bc = getattr(self, '_gato_bc', None)
         deadline = time.time() + 30.0
         advanced_at = None

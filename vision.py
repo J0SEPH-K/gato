@@ -310,3 +310,71 @@ class Vision:
             (st.scene, st.triggers, st.chat, st.whisper) = (scene, fired, chat, whisper)
 
 
+
+
+# ---- 불사신부 사용 확인 팝업 (용병/캐릭터 사망 시) -------------------------------------
+# '불사신부 사용시 의원으로 가지 않고 그 자리에서 부활할 수 있습니다. 사용하시겠습니까?' + 확인/취소.
+# Geometry measured 2026-11-19 from a client screenshot (1024x768 reference). Several other
+# dialogs (e.g. paid travel) share the same two-button layout, so the BUTTONS alone are never
+# enough to click: the message text must also match the stored text mask.
+REVIVE_OK_BOX = (532, 434, 586, 449)
+REVIVE_CANCEL_BOX = (604, 434, 658, 449)
+REVIVE_GAP_BOX = (588, 434, 602, 449)
+REVIVE_CLICK_XY = (558, 441)
+REVIVE_TEXT_BOX = (380, 340, 640, 392)
+REVIVE_TEXT_MIN = 0.6
+_REVIVE_MASK_PATH = os.path.join(_ASSET_DIR, 'revive_text_mask.png')
+_revive_mask = None
+
+
+def _warm_fill(img: np.ndarray, box) -> float:
+    x0, y0, x1, y1 = box
+    reg = img[y0:y1, x0:x1].astype(np.int16)
+    if reg.size == 0:
+        return 0.0
+    b, g, r = reg[..., 0], reg[..., 1], reg[..., 2]
+    m = (r > 120) & (r < 190) & (g > 110) & (g < 170) & (b > 95) & (b < 150) & (r - b > 15) & (r - b < 60)
+    return float(m.mean())
+
+
+def _load_revive_mask():
+    global _revive_mask
+    if _revive_mask is None and os.path.exists(_REVIVE_MASK_PATH):
+        m = cv2.imread(_REVIVE_MASK_PATH, cv2.IMREAD_GRAYSCALE)
+        if m is not None:
+            _revive_mask = (m > 127).astype(np.uint8)
+    return _revive_mask
+
+
+def find_revive_popup(img: np.ndarray):
+    """Returns ('ok', (x, y)) when the 불사신부 popup is visible (click (x, y) = 확인),
+    ('unknown', None) when a 확인/취소 dialog is at that spot but the message text does not
+    match (never click), or None when no such dialog is there."""
+    tpl = _load_revive_mask()
+    if tpl is None or img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return None
+    if _warm_fill(img, REVIVE_OK_BOX) < 0.55 or _warm_fill(img, REVIVE_CANCEL_BOX) < 0.55:
+        return None
+    if _warm_fill(img, REVIVE_GAP_BOX) > 0.15:
+        return None
+    k3 = np.ones((3, 3), np.uint8)
+    k5 = np.ones((5, 5), np.uint8)
+    t_d = cv2.dilate(tpl, k3)
+    x0, y0, x1, y1 = REVIVE_TEXT_BOX
+    best = (0.0, 0.0)
+    for dy in (-2, -1, 0, 1, 2):
+        for dx in (-2, -1, 0, 1, 2):
+            reg = img[y0 + dy:y1 + dy, x0 + dx:x1 + dx]
+            if reg.shape[:2] != tpl.shape:
+                continue
+            c = (cv2.cvtColor(reg, cv2.COLOR_BGR2GRAY) > 140).astype(np.uint8)
+            n = int(c.sum())
+            if n == 0:
+                continue
+            recall = float(np.logical_and(tpl, cv2.dilate(c, k5)).sum()) / max(1, int(tpl.sum()))
+            prec = float(np.logical_and(c, t_d).sum()) / n
+            if min(recall, prec) > min(best):
+                best = (recall, prec)
+    if min(best) >= REVIVE_TEXT_MIN:
+        return ('ok', REVIVE_CLICK_XY)
+    return ('unknown', None)
