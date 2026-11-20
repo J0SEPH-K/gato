@@ -1658,6 +1658,40 @@ class Brain:
         self._solve_thread = threading.Thread(target=_worker, daemon=True)
         self._solve_thread.start()
     def _handle_jamun(self, hands=None, hwnd=0, tag=''):
+        """Solve one 자방문 captcha and keep the evidence (full frames before typing / before confirm / 4 s after,
+        every attempt's crop, read text and confidence, what was typed, the verdict pixels) in
+        debug/jamun_rounds/ so a live run can be audited offline."""
+        self._jamun_rec = {'attempts': [], 'frames': {}}
+        try:
+            return self._handle_jamun_inner(hands, hwnd, tag)
+        finally:
+            try:
+                self._jamun_save(hwnd)
+            except Exception:
+                pass
+    def _jamun_note_frame(self, key, img):
+        try:
+            if img is not None:
+                self._jamun_rec['frames'][key] = img.copy()
+        except Exception:
+            pass
+    def _jamun_save(self, hwnd):
+        rec = getattr(self, '_jamun_rec', None)
+        if not rec or not rec.get('attempts'):
+            return
+        base = os.path.join(config.BASE_DIR, 'debug', 'jamun_rounds')
+        d = os.path.join(base, time.strftime('jamun_%Y%m%d_%H%M%S'))
+        os.makedirs(d, exist_ok=True)
+        for k, img in rec['frames'].items():
+            cv2.imwrite(os.path.join(d, k + '.png'), img)
+        meta = {k: v for k, v in rec.items() if k != 'frames'}
+        with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, default=str)
+        dirs = sorted(x for x in os.listdir(base) if x.startswith('jamun_'))
+        for old in dirs[:-60]:
+            __import__('shutil').rmtree(os.path.join(base, old), ignore_errors=True)
+        self._log(f'자방문 기록 저장 — {os.path.basename(d)} (시도 {len(rec["attempts"])}회)')
+    def _handle_jamun_inner(self, hands=None, hwnd=0, tag=''):
         hands = hands or self.hands
         cap = (lambda: grab_hwnd(hwnd)) if hwnd else self._cap
         cap_native = (lambda: grab_hwnd(hwnd, normalize=False)) if hwnd else self._cap_native
@@ -1683,6 +1717,12 @@ class Brain:
                         self._save_crop(config.JAMUN_DIR, crop)
                         text, conf = self.text_reader.read(crop)
                         self._log(f'{p}자방문 인식: {text} (margin {conf:.3f} / 스텝 {self.text_reader.last_step_conf:.3f})')
+                        try:
+                            self._jamun_rec['attempts'].append({'text': text, 'conf': round(float(conf), 4), 'step_conf': round(float(self.text_reader.last_step_conf), 4), 't': time.strftime('%H:%M:%S')})
+                            self._jamun_note_frame('attempt%d_full' % (attempt + 1), frame)
+                            self._jamun_note_frame('attempt%d_crop' % (attempt + 1), crop)
+                        except Exception:
+                            pass
                         if prev_text is not None and text == prev_text:
                                 self._log(f'{p}자방문 갱신 미반영 의심 — 직전과 동일 문자({text})')
                         if self._debug_jamun is not None:
@@ -1709,13 +1749,22 @@ class Brain:
             hands.click(*JAMUN_INPUT_XY, wait=True)
             time.sleep(0.2)
             submitted_text = _jamun_submission_text(text, self._auth_id())
+            self._jamun_rec['read_text'] = text
+            self._jamun_rec['submitted_text'] = submitted_text
             for ch in submitted_text:
                 hands.press(ch.lower(), wait=True)
                 time.sleep(0.5)
             time.sleep(2.0)
+            self._jamun_note_frame('before_confirm', cap())
             hands.click(446, 478, wait=True)
             time.sleep(4.0)
             frame = cap()
+            self._jamun_note_frame('after_confirm_4s', frame)
+            try:
+                self._jamun_rec['wrong_dialog_pixels'] = [vis._px_sum(frame, 589, 426, 590, 427), vis._px_sum(frame, 590, 426, 591, 427)] if frame is not None else None
+                self._jamun_rec['wrong_dialog_seen'] = bool(frame is not None and self._jamun_rec['wrong_dialog_pixels'] == [690, 690])
+            except Exception:
+                pass
             if frame is not None and vis._px_sum(frame, 589, 426, 590, 427) == 690 and (vis._px_sum(frame, 590, 426, 591, 427) == 690):
                 self._debug_jamun_wrong()
                 if not hwnd:
