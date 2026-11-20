@@ -127,7 +127,62 @@ link3.log(f'터널({link3.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에
 check('a dying tunnel logs its exit code and last output',
       logged and 'real error' in logged[0] and '코드 7' in logged[0], logged)
 
+# a truncated/blocked download (firewall swapping in an error page) must be rejected, not run:
+# this is what produced a 54 KB cloudflared.exe that crash-looped forever on the client PC.
+agent_link._cf_asset_real = agent_link._cf_asset
+agent_link._cf_asset = lambda: ('cloudflared-windows-amd64.exe', 'cloudflared.exe')
+link4_notes = []
+class V4:
+    @staticmethod
+    def note(k, m): link4_notes.append(m)
+class Api4:
+    vision = V4()
+    class brain: pass
+link4 = agent_link.Link(Api4(), 't', 'k', 'n')
+exe = os.path.join(agent_link._bin_dir(), 'cloudflared.exe')
+with open(exe, 'wb') as f:
+    f.write(b'junk' * 10)  # 40 bytes: a truncated download, already on disk
+dl_calls = []
+def fake_dl(self, url, dest):
+    dl_calls.append(url)
+    with open(dest, 'wb') as f:
+        f.write(b'X' * (20 * 1024 * 1024))
+    return dest
+orig_download = agent_link.Link._download
+agent_link.Link._download = fake_dl
+agent_link.subprocess.run = lambda *a, **k: None
+got = link4._cf_exe()
+check('a tiny pre-existing file is deleted and re-fetched, not trusted',
+      len(dl_calls) == 1 and os.path.getsize(got) > agent_link.Link.MIN_BYTES, (dl_calls, os.path.getsize(got)))
+check('the corruption is logged by name and size', any('손상' in m and '40바이트' in m for m in link4_notes), link4_notes)
+got2 = link4._cf_exe()
+check('a healthy existing file is trusted (no re-download)', len(dl_calls) == 1)
+
+def fake_dl_small(self, url, dest):
+    with open(dest, 'wb') as f:
+        f.write(b'<html>blocked</html>')
+    return dest
+agent_link.Link._download = fake_dl_small
+
+def fake_retrieve(url, tmp):
+    with open(tmp, 'wb') as f:
+        f.write(b'<html>login required</html>')
+real_download = agent_link.Link._download
+agent_link.Link._download = orig_download
+agent_link.urllib.request.urlretrieve = fake_retrieve
+try:
+    os.remove(exe)
+except OSError:
+    pass
+try:
+    link4._cf_exe()
+    check('a download that comes back tiny is rejected', False)
+except RuntimeError as e:
+    check('a download that comes back tiny is rejected', '손상' in str(e) or '차단' in str(e), e)
+agent_link._cf_asset = agent_link._cf_asset_real
+
 link.close()
 link2.close()
+link4.close()
 print('FAILED: %s' % fails if fails else 'all passed')
 sys.exit(1 if fails else 0)

@@ -223,10 +223,25 @@ class Link:
             f.seek(max(0, since))
             return f.read(MAX_LOG_BYTES)
 
+    MIN_BYTES = 8 * 1024 * 1024  # both cloudflared and the ngrok zip are tens of MB; a truncated
+                                  # or blocked download (firewall swapping in an error/login page)
+                                  # leaves something tiny that still gets "run" and dies instantly -
+                                  # this is what produced the 54 KB cloudflared.exe crash loop.
+
     def _download(self, url, dest):
         self.log(f'{os.path.basename(dest)} 내려받는 중')
         tmp = dest + '.part'
         urllib.request.urlretrieve(url, tmp)
+        size = os.path.getsize(tmp)
+        if size < self.MIN_BYTES:
+            head = b''
+            try:
+                with open(tmp, 'rb') as f:
+                    head = f.read(200)
+            except Exception:
+                pass
+            os.remove(tmp)
+            raise RuntimeError(f'다운로드 손상/차단 ({size}바이트, 예상보다 훨씬 작음) — {head[:80]!r}')
         os.replace(tmp, dest)
         return dest
 
@@ -235,6 +250,9 @@ class Link:
         wrong-architecture or partial download falls back instead of hanging forever."""
         asset, name = _cf_asset()
         exe = os.path.join(_bin_dir(), name)
+        if os.path.exists(exe) and os.path.getsize(exe) < self.MIN_BYTES:
+            self.log(f'{name} 손상된 파일 발견 ({os.path.getsize(exe)}바이트) — 삭제 후 다시 받음')
+            os.remove(exe)
         if not os.path.exists(exe):
             tmp = self._download(CF_DL + asset, os.path.join(_bin_dir(), asset))
             if asset.endswith('.tgz'):
@@ -256,6 +274,9 @@ class Link:
 
     def _ngrok_exe(self):
         exe = os.path.join(_bin_dir(), 'ngrok.exe')
+        if os.path.exists(exe) and os.path.getsize(exe) < self.MIN_BYTES:
+            self.log(f'ngrok.exe 손상된 파일 발견 ({os.path.getsize(exe)}바이트) — 삭제 후 다시 받음')
+            os.remove(exe)
         if os.path.exists(exe):
             return exe
         z = self._download(NGROK_DL, exe + '.zip')
