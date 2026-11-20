@@ -288,3 +288,148 @@ class JochulSolver:
                     std[s + bi] = _missing_from_pts(pts[cf >= CONF], w, h)
                     sens[s + bi] = _missing_from_pts(pts, w, h)
         return (std, sens)
+
+# ---------------------------------------------------------------------------------------------
+# EXPERIMENTAL, NOT WIRED IN: all-frames recording and global swap decoding (2026-11-20)
+#
+# The original pipeline sampled the screen 15 times a second and trusted one fixed swap period
+# (13 samples). Here every distinct frame the game delivers is kept with its arrival time, and the
+# swap sequence is found by one global search over (period, phase, 15 swaps) that maximises the
+# agreement between the per-frame detections and the swaps, with a penalty when two consecutive
+# swaps share a tile (the game never does that). The period is estimated from the data (0.70 s to
+# 1.10 s), so a different shuffle speed no longer breaks it.
+# ---------------------------------------------------------------------------------------------
+REF_W, REF_H = 1024, 768
+MAX_REC_FPS = 45.0
+PERIOD_S_NOMINAL = PERIOD / float(FPS)            # 0.8667 s per swap
+PERIOD_S_RANGE = (0.70, 1.10)
+PAIRS = [(a, b) for a in range(1, 6) for b in range(a + 1, 6)]
+_PAIR_INDEX = {p: i for i, p in enumerate(PAIRS)}
+
+
+def record_all(hwnd, duration=DURATION_S, stop=None, max_fps=MAX_REC_FPS):
+    """Keep EVERY distinct game frame for `duration` seconds (not a fixed 15 Hz sample).
+    Returns (crops, times); times are seconds since the first poll. Needs the WGC capture session
+    (it counts frames); falls back to ~30 Hz polling of the normal grab if WGC is unavailable."""
+    import cv2
+    import capture
+    import wgc
+    sess = wgc._session(hwnd) if wgc.available() else None
+    frames, times = [], []
+    t0 = time.perf_counter()
+    last_seq, last_t = -1, -1.0
+    next_poll = t0
+    min_gap = 1.0 / max_fps
+    while True:
+        now = time.perf_counter()
+        if now - t0 >= duration or (stop is not None and stop()):
+            break
+        f = None
+        if sess is not None:
+            seq = sess.frames
+            if seq != last_seq and now - t0 - last_t >= min_gap * 0.9:
+                info = sess.client_frame_info()
+                if info is not None:
+                    f, last_seq = info[0], info[2]
+                else:
+                    last_seq = seq
+                now = time.perf_counter()
+            else:
+                time.sleep(0.001)
+                continue
+        else:
+            if now < next_poll:
+                time.sleep(0.001)
+                continue
+            next_poll = now + 1.0 / 30.0
+            f = capture.grab_hwnd(hwnd, normalize=False)
+        if f is None:
+            continue
+        if (f.shape[1], f.shape[0]) != (REF_W, REF_H):
+            f = cv2.resize(f, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+        frames.append(np.ascontiguousarray(crop_region(f)))
+        last_t = now - t0
+        times.append(last_t)
+    return frames, times
+
+
+def _obs_matrix(per_std, per_sens, w_std=1.0, w_sens=0.35):
+    """Per-frame evidence for each of the 10 possible swaps: shape (n, 10).
+    A detected missing PAIR supports exactly that swap (+), contradicts a swap sharing one tile
+    a little and a disjoint swap more. A missing TRIPLE (one false slot) supports the 3 pairs inside it."""
+    n = len(per_std)
+    m = np.zeros((n, len(PAIRS)), np.float32)
+    for src, w in ((per_std, w_std), (per_sens, w_sens)):
+        if src is None:
+            continue
+        for i, v in enumerate(src):
+            if not v:
+                continue
+            sv = set(v)
+            if len(v) == 2:
+                for k, p in enumerate(PAIRS):
+                    inter = len(sv & set(p))
+                    m[i, k] += w * (1.0 if inter == 2 else (-0.25 if inter == 1 else -0.6))
+            elif len(v) == 3:
+                for k, p in enumerate(PAIRS):
+                    m[i, k] += w * (0.45 if set(p) <= sv else -0.35)
+    return m
+
+
+_OVERLAP = np.array([[1.0 if set(p) & set(q) else 0.0 for q in PAIRS] for p in PAIRS], np.float32)
+
+
+def dp_decode(per_std, times, per_sens=None, n_ops=N_OPS, overlap_penalty=4.0, period_range=PERIOD_S_RANGE,
+              t_step=0.005, phase_step=0.02, return_info=False):
+    """Global decode. per_std/per_sens: per-frame missing tuple or None at the frame arrival `times`
+    (seconds). Returns the list of swaps (n_ops pairs)."""
+    n = len(per_std)
+    if n == 0:
+        return ([], {}) if return_info else []
+    times = np.asarray(times, np.float64)
+    m = _obs_matrix(per_std, per_sens)
+    cum = np.vstack([np.zeros((1, m.shape[1]), np.float32), np.cumsum(m, axis=0)])
+    best = None
+    for T in np.arange(period_range[0], period_range[1] + 1e-9, t_step):
+        # prefer the nominal speed slightly when evidence is equal
+        prior = -0.15 * abs(T - PERIOD_S_NOMINAL) / 0.05
+        for phi in np.arange(-0.5 * T, 0.5 * T + 1e-9, phase_step):
+            edges = phi + T * np.arange(n_ops + 1)
+            idx = np.searchsorted(times, edges)
+            idx = np.clip(idx, 0, n)
+            block = cum[idx[1:]] - cum[idx[:-1]]               # (n_ops, 10)
+            # DP over blocks with a soft "no shared tile with the previous swap" rule
+            score = block[0].copy()
+            back = np.zeros((n_ops, len(PAIRS)), np.int8)
+            for k in range(1, n_ops):
+                trans = score[:, None] - overlap_penalty * _OVERLAP      # (prev, cur)
+                back[k] = np.argmax(trans, axis=0)
+                score = trans[back[k], np.arange(len(PAIRS))] + block[k]
+            end = int(np.argmax(score))
+            total = float(score[end]) + prior
+            if best is None or total > best[0]:
+                best = (total, T, phi, end, back.copy())
+    total, T, phi, end, back = best
+    seq = [end]
+    for k in range(n_ops - 1, 0, -1):
+        seq.append(int(back[k, seq[-1]]))
+    seq.reverse()
+    ops = [PAIRS[i] for i in seq]
+    if return_info:
+        viol = sum(1 for a, b in zip(ops, ops[1:]) if set(a) & set(b))
+        return ops, {'score': total, 'period_s': float(T), 'phase_s': float(phi), 'violations': viol, 'frames': n}
+    return ops
+
+
+def resample_vote(per_frame, times, fps=FPS):
+    """Aggregate many irregular samples into the fixed-rate grid the original decoder expects: each cell
+    takes the most common detection in it (a cell with only misses stays None)."""
+    if not times:
+        return list(per_frame)
+    n_grid = max(1, int(round(times[-1] * fps)) + 1)
+    cells = [[] for _ in range(n_grid)]
+    for det, t in zip(per_frame, times):
+        k = int(round(t * fps))
+        if 0 <= k < n_grid and det is not None:
+            cells[k].append(det)
+    return [Counter(c).most_common(1)[0][0] if c else None for c in cells]
