@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -42,7 +43,13 @@ def _cf_asset():
 CF_DL = 'https://github.com/cloudflare/cloudflared/releases/latest/download/'
 NGROK_URL_RE = re.compile(r'url=(https://[a-z0-9.\-]+\.ngrok[a-z0-9.\-]*)')
 NGROK_DL = 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip'
-ANNOUNCE_SEC = 25.0
+# ntfy.sh's free anonymous tier allows only 250 messages per IP per DAY (not per PC - if several of
+# his PCs share one office/home IP they share that quota too). Announcing every 25 s burned through
+# it in under 2 hours; after that every post 429s until the daily reset, which looked like the link
+# going dead. A real-time status no longer needs frequent announces at all: the hub can just ask the
+# PC's last known URL directly (see tools/hub.py). So this only has to announce rarely, plus whenever
+# the URL actually changes (new tunnel) - instant on the one event that matters.
+ANNOUNCE_SEC = 600.0
 MAX_LOG_BYTES = 4 * 1024 * 1024
 
 DEFAULT_TOPIC = 'gato-hub-un6q3wm4tu'
@@ -314,8 +321,21 @@ class Link:
                                               'user-agent': 'gato-link/1'})
         try:
             urllib.request.urlopen(req, timeout=15).read()
+            self._announce_fails = 0
+        except urllib.error.HTTPError as e:
+            self._announce_fails = getattr(self, '_announce_fails', 0) + 1
+            if self._announce_fails in (1, 5) or self._announce_fails % 50 == 0:
+                detail = ''
+                try:
+                    detail = e.read().decode('utf-8', 'replace')[:120]
+                except Exception:
+                    pass
+                self.log(f'알림 실패 {self._announce_fails}회: HTTP {e.code} {detail}'
+                         + (' — 공개 ntfy.sh 하루 할당량(IP당 250건) 소진 추정' if e.code == 429 else ''))
         except Exception as e:
-            self.log(f'알림 실패: {type(e).__name__}')
+            self._announce_fails = getattr(self, '_announce_fails', 0) + 1
+            if self._announce_fails in (1, 5) or self._announce_fails % 50 == 0:
+                self.log(f'알림 실패 {self._announce_fails}회: {type(e).__name__}: {e}')
 
     def start(self):
         """Bind a local port (LINK_PORT, or the next free one if two instances share a PC) and go."""

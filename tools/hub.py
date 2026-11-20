@@ -20,7 +20,7 @@ import urllib.request
 TOPIC = os.environ.get('GATO_TOPIC') or 'gato-hub-un6q3wm4tu'
 TOKEN = os.environ.get('GATO_TOKEN') or 'mt4hjwtg3bj5pc4npa3o3w5rfgu4tk2c'
 STALE_SEC = 150.0
-RECENT_SEC = 3 * 3600.0   # keep this long in the state file so 'last seen' works
+RECENT_SEC = 12 * 3600.0  # ntfy.sh's public cache only retains messages for ~12h anyway
 STATE = os.path.expanduser('~/.gato_hub/state.json')
 UA = {'user-agent': 'gato-hub/1', 'ngrok-skip-browser-warning': '1'}
 
@@ -113,23 +113,25 @@ def main(argv):
     cmd = argv[1] if len(argv) > 1 else 'list'
     live = poll()
     if cmd == 'list':
-        if not live:
-            print('no PC is up (nothing announced in the last %d s)' % STALE_SEC)
-            recent = _state()
-            for v in sorted(recent.values(), key=lambda x: -x['seen'])[:6]:
-                print(f"  last seen {int(time.time() - v['seen']) // 60}m ago: {v['pc']} v{v['ver']}")
-            if recent:
-                print('  (the app announces every 25 s while it runs - one that stopped is closed or crashed)')
-            else:
-                print('  (no PC has ever announced on this topic)')
+        # The PC now announces rarely (quota-limited), so "up" is decided by actually asking its last
+        # known URL for /status, not by how recently it announced. A PC that is still running but
+        # hasn't re-announced in a while still answers fine.
+        all_known = _state()
+        if not all_known:
+            print('no PC has ever announced on this topic')
             return 0
-        for k, v in sorted(live.items(), key=lambda x: x[1]['pc']):
+        any_up = False
+        for k, v in sorted(all_known.items(), key=lambda x: x[1]['pc']):
+            age = int(time.time() - v['seen'])
             try:
-                s = json.loads(get(v, '/status', 10))
-                state = ('running, %d battles' % s['battles']) if s['running'] else 'stopped'
-                print(f"{v['pc']:<20} v{v['ver']:<6} {state:<22} {s['monster']}  {int(time.time()-v['seen'])}s ago")
+                st = json.loads(get(v, '/status', 12, tries=2))
+                state = ('running, %d battles' % st['battles']) if st['running'] else 'stopped'
+                print(f"{v['pc']:<20} v{st.get('ver', v['ver']):<6} {state:<22} {st.get('monster',''):<14} last announced {age}s ago")
+                any_up = True
             except Exception as e:
-                print(f"{v['pc']:<20} v{v['ver']:<6} unreachable: {type(e).__name__}: {e}")
+                print(f"{v['pc']:<20} v{v['ver']:<6} unreachable ({type(e).__name__}) — last announced {age // 60}m ago")
+        if not any_up:
+            print('(none of the known PCs answered - all closed/crashed, or all their tunnels died)')
         return 0
     if cmd == 'watch':
         seen = set()
