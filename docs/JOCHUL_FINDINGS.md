@@ -1,16 +1,17 @@
 # 조철 암행어사 — what the game actually does (from real footage, 2026-11-20)
 
 Source: YouTube FG723pxOhO8 (2020, 960x720, ~11 distinct frames/s), six rounds. Start slot = slot under the gold 마패
-at the start, end slot = slot of the green highlighted character with the 마패 after the answer (frame-checked by eye).
+at the start (read by the medallion-colour detector, consistent over ~15 frames per round). End slot = where the medallion
+sits in the last ~4.5 s, same detector. NOT checked by eye (the image-description tool returned no text for these frames).
 
 | round | start slot | end slot |
 |---|---|---|
 | 1 | 4 | 2 |
 | 2 | 5 | 4 |
 | 3 | 4 | 4 |
-| 4 | 4 | 5 |
-| 5 | 1 | 5 |
-| 6 | 5 | 4 |
+| 4 | 4 | 5 or 3 (ambiguous: 15 vs 13 votes) |
+| 5 | 1 | 5 or 3 (ambiguous: 14 vs 10 votes) |
+| 6 | 5 | 4 (17 of 36 votes; others scattered) |
 
 ## Mechanics
 - 5 identical characters stand in a row (x = 65,145,225,305,385 in the 447x351 board crop, y~140), a counter counts 5 -> 0
@@ -23,7 +24,7 @@ at the start, end slot = slot of the green highlighted character with the 마패
 - Board layout matches the macro's coordinates (CLICK_X - 287, CLICK_Y - 231) to within 4 px.
 
 ## Measured on those six rounds
-- Old macro pipeline (15 fps sampling + swap-pair decoder): 0/6 (it only ever finds 10-11 "swaps").
+- Old macro pipeline (15 fps sampling + swap-pair decoder): 0/6 against the end slots above (rounds 4-5 count either candidate wrong) (it only ever finds 10-11 "swaps").
 - My all-frames swap decoder: not applicable (the game has no swaps).
 - Two tracking-by-detection prototypes on the YOLO detections (Hungarian + constant velocity; min-cost flow over all
   frames): 1/6 and 0-1/6 = chance. The detector sees on average 3.8-4.2 of the 5 characters per frame in the scatter.
