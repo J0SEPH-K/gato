@@ -1761,8 +1761,7 @@ class Brain:
         main_since = None
         loop_n = 0
         last_click_n = None
-        digit_seen_since_click = False
-        dummy_stacks = 0
+        dummy_guard = detector.DummyGuard()
         no_frame_at = 0.0
         # NATAS/manager (2026-11-18): STOP_NOW_TRIGGERS fired on a single bad frame
         # (measured: '팅(시스템 팝업)' region read 216/220 vs the real threshold
@@ -1866,19 +1865,18 @@ class Brain:
                                         num = detector.read_top_number(img, dump_dir=config.DIGIT_DEBUG_DIR)
                                         if num is not None:
                                             self._digit_at = time.time()
-                                            digit_seen_since_click = True
+                                            dummy_guard.progress()
                                             self._log('전투 대기중')
                             if prev_busy and (not self._battle_running):
                                     last_click_n = None
-                                    digit_seen_since_click = False
-                                    dummy_stacks = 0
+                                    dummy_guard.progress()
+                            if self._battle_running:
+                                dummy_guard.progress()
                             prev_busy = self._battle_running
                             search_window.update(scene == 'main' and (not self._battle_running))
                             fixed_sc = config.mob_gate_scale(self.monster)
                             gate_sc = fixed_sc if fixed_sc is not None else 1.0
                             mob_gate_sc = gate_sc * search_window.scale
-                            if dummy_stacks and last_click_n is not None and (loop_n - last_click_n > detector.DUMMY_RESET_LOOPS):
-                                        dummy_stacks = 0
                             if self._close_stray_window(img, scene, fired):
                                 self.engine.wait_new(_fid, 0.05)
                                 continue
@@ -1904,7 +1902,7 @@ class Brain:
                                                                     sprite_opts = {}
                                                                     if isinstance(self.detector, detector.SpriteDetector):
                                                                         sprite_opts['allow_avoid2'] = main_since is not None and time.monotonic() - main_since >= detector.SPRITE_AVOID2_DELAY_SEC
-                                                                    coords = self.detector.detect(img, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts)
+                                                                    coords = dummy_guard.filter(self.detector.detect(img, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts), time.time())
                                                                     pick = detector.nearest_in_gate(coords, mob_gate_sc, center=detector.CENTER)
                                                                     search_window.advance(units)
                                                                     if pick:
@@ -1915,7 +1913,7 @@ class Brain:
                                                                             self._log('색적 결과 폐기 — 클릭 직전 화면 변경(연산 지연)')
                                                                             pick = None
                                                                         else:
-                                                                            c2 = detector.drop_ui_points(self.detector.detect(fresh, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts))
+                                                                            c2 = dummy_guard.filter(detector.drop_ui_points(self.detector.detect(fresh, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts)), time.time())
                                                                             near = None
                                                                             if c2 is not None and c2.shape[0]:
                                                                                 dd = np.hypot(c2[:, 0] - pick[0], c2[:, 1] - pick[1])
@@ -1946,15 +1944,15 @@ class Brain:
                                                                         self._battle_click = -detector.click_cooldown(dist)
                                                                         search_window.reset()
                                                                         self._log('몹 클릭')
-                                                                        if not self.ignore_dummy and last_click_n is not None and (dist <= detector.DUMMY_NEAR_DIST) and (not digit_seen_since_click):
-                                                                            dummy_stacks += 1
-                                                                            self._log(f'더미몹 의심 {dummy_stacks}/{detector.DUMMY_STACK_STOP} (숫자 미감지 재클릭)')
-                                                                            if dummy_stacks >= detector.DUMMY_STACK_STOP:
-                                                                                self._stop_bot('더미몹 의심 (숫자 미감지 연속 재클릭)')
-                                                                        else:
-                                                                            dummy_stacks = 0
+                                                                        if not self.ignore_dummy:
+                                                                            verdict = dummy_guard.click(x, y, dist, time.time())
+                                                                            if verdict == 'suspect':
+                                                                                self._log(f'더미몹 의심 — 재클릭 {dummy_guard.clicks}회, 응답 없음 {time.time() - (dummy_guard.first_t or time.time()):.0f}초 ({detector.DummyGuard.MIN_SECONDS:.0f}초 넘으면 건너뜀)')
+                                                                            elif verdict == 'skip':
+                                                                                self._log('더미몹 판정 — 이 자리를 45초간 건너뛰고 계속 사냥')
+                                                                            elif verdict == 'stop':
+                                                                                self._stop_bot('더미몹 반복 (건너뛰어도 전투 미진입)')
                                                                         last_click_n = loop_n
-                                                                        digit_seen_since_click = False
                             if self.box_click and (not self._battle_running) and (self._shutdown_at is None) and (scene == 'main') and (not self._sub_solving) and (not self.rest_mode) and (self._battle_click >= 1):
                                                         pick = detector.nearest_in_gate(detector.find_boxes(img), gate_sc)
                                                         if pick:

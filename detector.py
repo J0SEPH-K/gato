@@ -535,6 +535,71 @@ def drop_ui_points(coords):
     return coords[keep]
 
 
+class DummyGuard:
+    """Decides when a mob that keeps being re-clicked is a dummy (cannot be attacked / unreachable).
+
+    The old rule stopped the whole macro after 6 re-clicks with no digit read, which is about 6 s:
+    a mob that is simply being walked to, or a digit the reader missed, ended the run (a fight often
+    started seconds later). Now a mob must stay unanswered for MIN_SECONDS of real time AND
+    MIN_CLICKS re-clicks. Then that spot is skipped for BLACKLIST_SEC and hunting goes on; only
+    repeated blacklisting with no fight in between (ESCALATE within ESCALATE_WINDOW) stops it.
+    Any fight start / digit read calls progress() and clears everything.
+    """
+    NEAR = DUMMY_NEAR_DIST
+    MIN_CLICKS = DUMMY_STACK_STOP
+    MIN_SECONDS = 15.0
+    STALE_SECONDS = 3.0
+    BLACKLIST_SEC = 45.0
+    BLACKLIST_RADIUS = 45.0
+    ESCALATE = 3
+    ESCALATE_WINDOW = 180.0
+
+    def __init__(self):
+        self.clicks = 0
+        self.first_t = None
+        self.last_t = None
+        self.black = []      # (x, y, expires)
+        self.events = []     # times of blacklisting with no progress in between
+
+    def progress(self):
+        """A fight started or the countdown digit was seen: the clicks worked."""
+        self.clicks = 0
+        self.first_t = None
+        self.last_t = None
+        self.events = []
+
+    def click(self, x, y, dist, now):
+        """Register a mob click. Returns 'ok', 'suspect' (n-th unanswered re-click), 'skip' or 'stop'."""
+        if self.last_t is not None and now - self.last_t > self.STALE_SECONDS:
+            self.clicks, self.first_t, self.last_t = 0, None, None
+        verdict = 'ok'
+        if self.last_t is not None and dist <= self.NEAR:
+            if self.first_t is None:
+                self.first_t = self.last_t
+            self.clicks += 1
+            verdict = 'suspect'
+            if self.clicks >= self.MIN_CLICKS and now - self.first_t >= self.MIN_SECONDS:
+                self.black.append((x, y, now + self.BLACKLIST_SEC))
+                self.events = [t for t in self.events if now - t < self.ESCALATE_WINDOW] + [now]
+                self.clicks, self.first_t = 0, None
+                self.last_t = None
+                return 'stop' if len(self.events) >= self.ESCALATE else 'skip'
+        else:
+            self.clicks, self.first_t = 0, None
+        self.last_t = now
+        return verdict
+
+    def filter(self, coords, now):
+        """Drop detections on a skipped spot."""
+        self.black = [b for b in self.black if b[2] > now]
+        if coords is None or not self.black or coords.shape[0] == 0:
+            return coords
+        keep = np.ones(coords.shape[0], dtype=bool)
+        for bx, by, _ in self.black:
+            keep &= np.hypot(coords[:, 0] - bx, coords[:, 1] - by) > self.BLACKLIST_RADIUS
+        return coords[keep]
+
+
 def nearest_in_gate(coords, scale = 1.0, center = None):
     coords = drop_ui_points(coords)
     if coords is None or coords.shape[0] == 0:
