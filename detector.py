@@ -553,41 +553,64 @@ class DummyGuard:
     BLACKLIST_RADIUS = 45.0
     ESCALATE = 3
     ESCALATE_WINDOW = 180.0
+    # On a crowded map (many players standing on the mobs) most clicks land on a mob that cannot be
+    # attacked, so several spots get skipped in a row. The rule therefore never stops the macro: once
+    # enough spots are skipped it clears the whole list and starts over, which keeps it clicking until
+    # the countdown actually starts. A real disconnect is caught by the separate no-fight clock.
+    RESET_AFTER = 4
 
     def __init__(self):
-        self.clicks = 0
-        self.first_t = None
+        self.spots = {}      # rounded (x, y) -> [clicks, first_t]
+        self.last_key = None
         self.last_t = None
         self.black = []      # (x, y, expires)
         self.events = []     # times of blacklisting with no progress in between
 
+    @property
+    def clicks(self):
+        """Re-clicks on the spot clicked last: the first click on a new spot is not a re-click."""
+        v = self.spots.get(self.last_key)
+        return v[0] - 1 if v else 0
+
+    @property
+    def first_t(self):
+        v = self.spots.get(self.last_key)
+        return v[1] if v else None
+
     def progress(self):
         """A fight started or the countdown digit was seen: the clicks worked."""
-        self.clicks = 0
-        self.first_t = None
+        self.spots = {}
+        self.last_key = None
         self.last_t = None
         self.events = []
 
     def click(self, x, y, dist, now):
-        """Register a mob click. Returns 'ok', 'suspect' (n-th unanswered re-click), 'skip' or 'stop'."""
+        """Register a mob click. Returns 'ok', 'suspect' (n-th unanswered re-click), 'skip' (skip this
+        spot and keep hunting) or 'skip_all' (every skipped spot was cleared - retry everything).
+
+        The counter is kept PER SPOT, not against the previous click: on a crowded map the nearest
+        mob changes every time, and one shared counter that reset on every change never reached the
+        limit, so nothing was ever skipped and the no-fight clock stopped the run.
+        """
         if self.last_t is not None and now - self.last_t > self.STALE_SECONDS:
-            self.clicks, self.first_t, self.last_t = 0, None, None
-        verdict = 'ok'
-        if self.last_t is not None and dist <= self.NEAR:
-            if self.first_t is None:
-                self.first_t = self.last_t
-            self.clicks += 1
-            verdict = 'suspect'
-            if self.clicks >= self.MIN_CLICKS and now - self.first_t >= self.MIN_SECONDS:
-                self.black.append((x, y, now + self.BLACKLIST_SEC))
-                self.events = [t for t in self.events if now - t < self.ESCALATE_WINDOW] + [now]
-                self.clicks, self.first_t = 0, None
-                self.last_t = None
-                return 'stop' if len(self.events) >= self.ESCALATE else 'skip'
-        else:
-            self.clicks, self.first_t = 0, None
+            self.spots = {}
+            self.last_key = None
         self.last_t = now
-        return verdict
+        key = (int(round(x / 25.0)), int(round(y / 25.0)))
+        self.last_key = key
+        spot = self.spots.setdefault(key, [0, now])
+        spot[0] += 1
+        if spot[0] < self.MIN_CLICKS or now - spot[1] < self.MIN_SECONDS:
+            return 'suspect' if spot[0] > 1 else 'ok'
+        self.black.append((x, y, now + self.BLACKLIST_SEC))
+        self.events = [t for t in self.events if now - t < self.ESCALATE_WINDOW] + [now]
+        del self.spots[key]
+        if len(self.events) >= self.ESCALATE and len(self.black) >= self.RESET_AFTER:
+            self.black = []
+            self.events = []
+            self.spots = {}
+            return 'skip_all'
+        return 'skip'
 
     def filter(self, coords, now):
         """Drop detections on a skipped spot."""

@@ -61,15 +61,18 @@ for i in range(5):
 g.click(500, 300, 40.0, 1030)
 check('gap > 3 s resets', g.clicks == 0, g.clicks)
 
-# 7. three skips with no fight in between -> stop
+# 7. skips with no fight in between never stop it; the 4th clears every skipped spot and retries
+# (crowded map: most clicks land on a mob that cannot be attacked)
 g = D()
 res = []
 t = 1000.0
-for rnd in range(3):
+for rnd in range(4):
     for i in range(20):
         res.append(g.click(500 + rnd * 200, 300, 40.0, t))
         t += 0.9
-check('3 skips without a fight -> stop', res.count('skip') == 2 and res.count('stop') == 1, (res.count('skip'), res.count('stop')))
+check('3 skips, then a full reset instead of a stop',
+      res.count('skip') == 3 and res.count('skip_all') == 1 and 'stop' not in res, res)
+check('the reset clears the blacklist', g.black == [] and g.events == [], (g.black, g.events))
 
 # 8. fights in between keep it from stopping
 g = D()
@@ -80,7 +83,7 @@ for rnd in range(6):
         res.append(g.click(500 + rnd * 100, 300, 40.0, t))
         t += 0.9
     g.progress()
-check('a fight between skips -> never stops', 'stop' not in res, res.count('stop'))
+check('a fight between skips -> never skips all or stops', not ({'stop', 'skip_all'} & set(res)), res)
 
 # 9. normal hunting: click, fight, click, fight - never suspect beyond 1
 g = D()

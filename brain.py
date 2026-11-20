@@ -2065,8 +2065,9 @@ class Brain:
                                                                                 # we were actively clicking for 15 s: that is not a disconnect, so the
                                                                                 # 30 s "no fight = 팅 의심" clock must not run through this
                                                                                 self._no_battle_count = 0
-                                                                            elif verdict == 'stop':
-                                                                                self._stop_bot('더미몹 반복 (건너뛰어도 전투 미진입)')
+                                                                            elif verdict == 'skip_all':
+                                                                                self._log(f'더미몹 {detector.DummyGuard.RESET_AFTER}곳 누적 — 건너뛴 자리 전체 해제, 처음부터 다시')
+                                                                                self._no_battle_count = 0
                                                                         last_click_n = loop_n
                             if self.box_click and (not self._battle_running) and (self._shutdown_at is None) and (scene == 'main') and (not self._sub_solving) and (not self.rest_mode) and (self._battle_click >= 1):
                                                         pick = detector.nearest_in_gate(detector.find_boxes(img), gate_sc)
