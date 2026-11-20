@@ -55,6 +55,8 @@ check('/shot returns a JPEG', body[:2] == b'\xff\xd8' and len(body) > 500, body[
 s, body = req('/cmd', data=json.dumps({'cmd': 'stop'}).encode())
 check('/cmd reaches the bot', json.loads(body)['ok'] and api.cmds == [('stop', '')], api.cmds)
 check('/ping', req('/ping')[0] == 200)
+link.close()  # its background thread (local-server poll + ntfy announce) must not share
+              # urllib.request.urlopen with the monkeypatches used by the tests below
 
 seen = [json.dumps({'pc': 'A', 'machine': 'm1', 'url': 'https://a.ngrok-free.app', 'ver': '1.0.3'}, ensure_ascii=False),
         json.dumps({'pc': 'B', 'machine': 'm2', 'url': 'https://b.ngrok-free.app', 'ver': '1.0.3'})]
@@ -221,6 +223,41 @@ link5._cf_exe = lambda: '/fake/cloudflared.exe'
 link5._start_tunnel()
 check('once the cooldown passes, cloudflared is tried again', link5.tunnel_kind == 'cloudflared')
 link5.close()
+
+# regression: a dead tunnel must be reported ONCE and then actually wait out its backoff - a loop
+# that re-polls every 5 s while waiting must not keep "re-discovering" the same death, resetting the
+# backoff forever and never calling _start_tunnel() again (this is what got the client PC stuck
+# repeating "20\ubd84\uac04 ngrok \uc0ac\uc6a9" every 5 s with no ngrok ever actually starting).
+link6_logs = []
+class V6:
+    @staticmethod
+    def note(k, m): link6_logs.append(m)
+class Api6:
+    vision = V6()
+    class brain: pass
+link6 = agent_link.Link(Api6(), 't', 'k', 'n')
+link6.port = 9
+link6.tunnel_kind = 'cloudflared'
+link6._tunnel_tail = ['quick tunnel provisioning failed with status 429']
+link6._tunnel_started_at = time.time() - 5.0
+class DeadOnce:
+    def poll(self): return 1
+link6.tunnel = DeadOnce()
+restarts6 = []
+link6._start_tunnel = lambda: restarts6.append(time.time())
+import unittest.mock as um
+t0 = time.time()
+for i in range(6):
+    with um.patch('time.time', return_value=t0 + i * 2.0):
+        if link6.tunnel is not None and link6.tunnel.poll() is not None:
+            link6._handle_tunnel_death()
+        if link6.tunnel is None and time.time() >= link6._next_start_at:
+            link6._start_tunnel()
+check('a dead tunnel is reported exactly once across repeated polls, not every poll',
+      sum('429' in m for m in link6_logs) == 1, link6_logs)
+check('_start_tunnel runs once, after the backoff actually elapses (not stuck forever)',
+      len(restarts6) == 1, restarts6)
+link6.close()
 
 link.close()
 link2.close()

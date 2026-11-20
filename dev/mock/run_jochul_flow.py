@@ -6,7 +6,7 @@ import numpy as np
 import mock_loop as m
 import brain, jochul, config
 
-def make(tile_after, marker_slot=None):
+def make(tile_after, marker_slot=None, track_answer=4):
     notes, t0 = [], time.time()
     hands = m.FakeHands()
     parks = []
@@ -18,10 +18,19 @@ def make(tile_after, marker_slot=None):
     solved = {}
     class Solver:
         ready = True
-        def solve(self, frames, times, first):
+        def solve_tracked(self, frames, times, first):
             solved.update(n=len(frames), first=first)
-            return 4, [(1, 2)] * 15
+            return track_answer, 'ok (mock tracker)'
+        def _detect_missing(self, frames):
+            return [None] * len(frames), [None] * len(frames)
     b.jochul_solver = Solver()
+    # the live code now captures with jochul.record_all (wgc/capture internals, not brain.grab_hwnd),
+    # so it is stubbed directly here with a plausible native-fps frame/time series
+    n_fake = 300
+    def _fake_record_all(hwnd, duration=jochul.DURATION_S, stop=None):
+        time.sleep(1.2)  # gives the parallel RoundRecorder a realistic window to gather frames
+        return [np.zeros((4, 4, 3), np.uint8)] * n_fake, [round(i * duration / n_fake, 4) for i in range(n_fake)]
+    jochul.record_all = _fake_record_all
     def cap():
         f = np.full((768, 1024, 3), (40, 100, 40), np.uint8)    # plain grass: no accidental pixel patterns
         if marker_slot and int((time.time() - t0) * 25) % 5 < 2:      # medallion bobs: visible ~40% of frames
@@ -51,7 +60,7 @@ t = time.time(); b._handle_jochul(); el = time.time() - t
 clicks = [h for h in hands.log if h[0] == 'click']
 check('tile visible: first tile found', any('첫 마패: 2번' in n for n in notes), notes[:4])
 check('parked cursor first', parks and parks[0] == jochul.PARK_XY)
-check('recorded ~13.5 s of frames at ~15 fps', 150 <= solved.get('n', 0) <= 215, solved)
+check('captured with record_all (all-native-frame), ~300 fake frames', solved.get('n', 0) == 300, solved)
 check('answer 4 -> two clicks at x=%d' % jochul.CLICK_X[4], len(clicks) == 2 and all(c[2] == jochul.CLICK_X[4] and c[3] == jochul.CLICK_Y for c in clicks), clicks)
 check('popup-closed message logged (not called a pass)', any('조철 클릭 후 창 닫힘' in n for n in notes))
 print('  flow took %.1f s' % el)
@@ -60,7 +69,7 @@ dirs = sorted(os.listdir(rd)) if os.path.isdir(rd) else []
 check('round recording saved', len(dirs) == 1, dirs)
 if dirs:
     meta = json.load(open(os.path.join(rd, dirs[0], 'meta.json'), encoding='utf-8'))
-    check('recording has frames + times + labels', meta['frames'] > 300 and len(meta['times']) == meta['frames'] and meta.get('answer') == 4 and meta.get('first') == 2, {k: meta.get(k) for k in ('frames', 'answer', 'first', 'mode', 'effective_fps', 'seconds')})
+    check('recording has frames + times + labels', meta['frames'] > 10 and len(meta['times']) == meta['frames'] and meta.get('answer') == 4 and meta.get('first') == 2, {k: meta.get(k) for k in ('frames', 'answer', 'first', 'mode', 'effective_fps', 'seconds')})
     check('frame files readable', len([f for f in os.listdir(os.path.join(rd, dirs[0])) if f.endswith('.jpg')]) == meta['frames'])
 
 # 2) marker appears 0.7 s late -> retry finds it, no stop

@@ -50,6 +50,9 @@ NGROK_DL = 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.z
 # PC's last known URL directly (see tools/hub.py). So this only has to announce rarely, plus whenever
 # the URL actually changes (new tunnel) - instant on the one event that matters.
 ANNOUNCE_SEC = 600.0
+POLL_SEC = 5.0  # how often tunnel/local health is checked; independent of ANNOUNCE_SEC
+PUBLIC_GRACE_SEC = 45.0  # time to let a fresh quick tunnel's route finish propagating
+PUBLIC_FAIL_LIMIT = 4    # consecutive failures AFTER the grace period before recreating it
 MAX_LOG_BYTES = 4 * 1024 * 1024
 
 DEFAULT_TOPIC = 'gato-hub-un6q3wm4tu'
@@ -124,6 +127,7 @@ class Link:
         self._tunnel_fails = 0
         self._next_start_at = 0.0
         self._cf_blocked_until = 0.0  # cloudflared rate-limited (HTTP 429): use ngrok for a while
+        self._url_since = 0.0
         self.httpd = None
         self._stop = threading.Event()
         self.log = lambda m: api.vision.note('input', f'[링크] {m}')
@@ -330,6 +334,7 @@ class Link:
                     url = m.group(0 if self.tunnel_kind == 'cloudflared' else 1)
                     if url != self.url:
                         self.url = url
+                        self._url_since = time.time()
                         self._tunnel_fails = 0
                         self.log(f'터널({self.tunnel_kind}) {url}')
                         threading.Thread(target=self._announce_verified, daemon=True).start()
@@ -438,10 +443,39 @@ class Link:
                 continue
         return False
 
+    def _handle_tunnel_death(self):
+        """A dead tunnel is reported and backed off EXACTLY ONCE per death: self.tunnel is cleared
+        right after logging, so a loop that polls every 5 s while waiting out the backoff does not
+        keep "discovering" the same already-reported death over and over, which previously reset
+        the backoff timer on every poll and meant _start_tunnel() never ran again (the 20-min ngrok
+        fallback on a cloudflared 429 could get stuck exactly this way, forever)."""
+        code = self.tunnel.poll()
+        up = time.time() - getattr(self, '_tunnel_started_at', time.time())
+        tail = ' | '.join(self._tunnel_tail[-2:]) if self._tunnel_tail else '(출력 없음)'
+        rate_limited = self.tunnel_kind == 'cloudflared' and any(
+            '429' in t or 'rate' in t.lower() for t in self._tunnel_tail)
+        self._tunnel_fails += 1
+        if rate_limited:
+            self._cf_blocked_until = time.time() + 1200.0
+            backoff = 10.0
+            self.log(f'터널(cloudflared) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]} '
+                     f'— 요청 제한(429) 감지, 20분간 ngrok 사용')
+        else:
+            backoff = min(120.0, 5.0 * (2 ** min(self._tunnel_fails - 1, 5)))
+            self.log(f'터널({self.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]}'
+                     f' — {backoff:.0f}초 후 재시작')
+        self._next_start_at = time.time() + backoff
+        self.tunnel = None
+        self.url = ''
+
     def _loop(self):
+        """Always polls every POLL_SEC regardless of self.url: tunnel health must be checked often
+        (a crash should be noticed in seconds), while actually telling ntfy is the rare part (that's
+        what the 250/day quota is about) - the two must not share one interval."""
         bad_local = 0
         bad_public = 0
-        while not self._stop.wait(ANNOUNCE_SEC if self.url else 5.0):
+        next_announce = 0.0
+        while not self._stop.wait(POLL_SEC):
             try:
                 if not self._local_ok():
                     bad_local += 1
@@ -452,44 +486,34 @@ class Link:
                         bad_local = 0
                 else:
                     bad_local = 0
-                if self.tunnel is None or self.tunnel.poll() is not None:
-                    if self.tunnel is not None:
-                        code = self.tunnel.poll()
-                        up = time.time() - getattr(self, '_tunnel_started_at', time.time())
-                        tail = ' | '.join(self._tunnel_tail[-2:]) if self._tunnel_tail else '(출력 없음)'
-                        rate_limited = self.tunnel_kind == 'cloudflared' and any(
-                            '429' in t or 'rate' in t.lower() for t in self._tunnel_tail)
-                        self._tunnel_fails += 1
-                        if rate_limited:
-                            # a real quota, not a one-off glitch: use ngrok for 20 min instead of
-                            # hammering cloudflare's provisioning endpoint and making it worse
-                            self._cf_blocked_until = time.time() + 1200.0
-                            backoff = 10.0
-                            self.log(f'터널(cloudflared) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]} '
-                                     f'— 요청 제한(429) 감지, 20분간 ngrok 사용')
-                        else:
-                            backoff = min(120.0, 5.0 * (2 ** min(self._tunnel_fails - 1, 5)))
-                            self.log(f'터널({self.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]}'
-                                     f' — {backoff:.0f}초 후 재시작')
-                        self._next_start_at = time.time() + backoff
-                    self.url = ''
+                if self.tunnel is not None and self.tunnel.poll() is not None:
+                    self._handle_tunnel_death()
+                if self.tunnel is None:
                     if time.time() >= self._next_start_at:
                         self._start_tunnel()
                         bad_public = 0
                 elif self.url:
-                    if self._public_ok():
+                    # a fresh quick tunnel can take a while for Cloudflare's edge to fully route;
+                    # checking (and killing it on an early false negative) before PUBLIC_GRACE_SEC
+                    # has passed is what caused good tunnels to be torn down and recreated every
+                    # ~15 s, which is almost certainly what triggered the 429 in the first place.
+                    if time.time() - self._url_since < PUBLIC_GRACE_SEC:
+                        bad_public = 0
+                    elif self._public_ok():
                         bad_public = 0
                     else:
                         bad_public += 1
-                        if bad_public >= 2:
-                            self.log(f'터널 무응답 {bad_public}회 — 새 터널')
+                        if bad_public >= PUBLIC_FAIL_LIMIT:
+                            self.log(f'터널 무응답 {bad_public}회 ({PUBLIC_GRACE_SEC:.0f}초 유예 후) — 새 터널')
                             try:
                                 self.tunnel.terminate()
                             except Exception:
                                 pass
                             self.url = ''
                             bad_public = 0
-                self._announce()
+                if time.time() >= next_announce:
+                    self._announce()
+                    next_announce = time.time() + ANNOUNCE_SEC
             except Exception as e:
                 self.log(f'{type(e).__name__}: {e}')
 

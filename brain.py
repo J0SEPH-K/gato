@@ -1575,26 +1575,39 @@ class Brain:
                     time.sleep(max(0.0, jochul.SHUFFLE_DELAY - (time.time() - _t_ref)))
                     rec_hwnd = hwnd or self.engine.hwnd or find_window()
                     rec_cap = (lambda: grab_hwnd(rec_hwnd)) if rec_hwnd else self._cap
-                    frames, times = jochul.record(rec_cap)
+                    # all-native-frame capture + velocity/Hungarian tracking of the detector's own
+                    # centroids is the PRIMARY answer (2026-11-20): on the one real, user-confirmed
+                    # round available, the old swap-model decoder (periodic_decode) got it WRONG in
+                    # every tuning tried, while this tracker got it right in 9/9 parameter settings.
+                    # periodic_decode is still run and recorded for comparison, never for the click.
+                    frames, times = jochul.record_all(rec_hwnd, duration=jochul.DURATION_S,
+                                                       stop=lambda: not self.running) if rec_hwnd else ([], [])
                     if not self.running:
                         return
                     else:
                         _t0 = time.perf_counter()
-                        answer, ops = self.jochul_solver.solve(frames, times, first)
+                        answer, track_info = self.jochul_solver.solve_tracked(frames, times, first)
                         solve_s = time.perf_counter() - _t0
-                        n_ops = len(ops)
-                        self._log(f'{p}조철 연산 {n_ops}개(15 기대) → 정답: {answer} (해석 {solve_s:.1f}s)')
+                        self._log(f'{p}조철 추적 {len(frames)}프레임 → 정답: {answer} (해석 {solve_s:.1f}s, {track_info})')
                         import net
-                        meta = {'ver': net.CODE_VER, 'first': first, 'n_ops': n_ops, 'ops': [list(o) for o in ops], 'order': jochul.apply_swaps(ops), 'answer': answer, 'attempts': [], 'passed': None, 'solve_s': round(solve_s, 2)}
+                        per_std, per_sens = self.jochul_solver._detect_missing(frames)
+                        ops = jochul.periodic_decode(jochul._resample_uniform(per_std, times),
+                                                      per_frame_sens=jochul._resample_uniform(per_sens, times))
+                        n_ops = len(ops)
+                        old_order = jochul.apply_swaps(ops)
+                        old_answer = old_order.index(first) + 1 if first in old_order else None
+                        meta = {'ver': net.CODE_VER, 'first': first, 'n_ops': n_ops, 'ops': [list(o) for o in ops],
+                                'order': old_order, 'swap_decoder_answer': old_answer, 'answer': answer,
+                                'track_info': track_info, 'attempts': [], 'passed': None, 'solve_s': round(solve_s, 2)}
                         self._jochul_meta = meta
                         meta['marker_votes'] = {str(k): _marker_seen.count(k) for k in set(_marker_seen) if k}
                         dump = None
-                        if n_ops != 15 or answer is None:
+                        if answer is None or answer != old_answer:
                             dump = self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})
-                            self._upload_jochul_debug(frames, times, f'n_ops={n_ops}', meta=dict(meta), first_img=frame)
+                            self._upload_jochul_debug(frames, times, f'tracker={answer} swap_decoder={old_answer}', meta=dict(meta), first_img=frame)
                         if answer is None:
-                            answer = 3
-                            self._log(f'{p}조철 해독 불확실 → 중앙({answer}) 클릭')
+                            answer = old_answer if old_answer is not None else 3
+                            self._log(f'{p}조철 추적 실패 → {"스왑 해독값" if old_answer is not None else "중앙"}({answer}) 클릭')
                         meta['clicked'] = answer
                         x = jochul.CLICK_X[answer]
                         time.sleep(1.0)

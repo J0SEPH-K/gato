@@ -1,0 +1,91 @@
+"""jochul.track_centroids / solve_tracked: regression test against a REAL, user-confirmed-correct
+client round (dev/fixtures/jochul_round1), plus synthetic edge cases for _assign_optimal.
+Needs ultralytics+torch (the real model), so it's skipped (not failed) where those aren't installed.
+   python dev/test_jochul_tracker.py"""
+import json
+import os
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import jochul
+
+fails = []
+
+
+def check(name, cond, extra=''):
+    print(('PASS ' if cond else 'FAIL ') + name + ('' if cond else ' -- ' + str(extra)))
+    if not cond:
+        fails.append(name)
+
+
+# --- _assign_optimal: must match brute-force-obvious answers, including RECTANGULAR matrices
+# (fewer detections than tracked points, or more) ---
+sq = np.array([[1.0, 9, 9], [9, 1.0, 9], [9, 9, 1.0]])
+r, c = jochul._assign_optimal(sq)
+check('square matrix: picks the diagonal (cheapest)', list(zip(r.tolist(), c.tolist())) == [(0, 0), (1, 1), (2, 2)], (r, c))
+
+fewer_cols = np.array([[0.0, 9, 9], [9, 0.0, 9], [9, 9, 9], [9, 9, 9]])  # 4 rows, 3 cols
+r, c = jochul._assign_optimal(fewer_cols)
+check('fewer detections than tracked points: assigns exactly 3 (not 4)', len(r) == 3 and len(c) == 3, (r, c))
+check('fewer-cols case still finds the two free cheap matches', set(zip(r.tolist(), c.tolist())) >= {(0, 0), (1, 1)}, (r, c))
+
+fewer_rows = np.array([[0.0, 9, 9, 9], [9, 0.0, 9, 9], [9, 9, 9, 9]])  # 3 rows, 4 cols
+r, c = jochul._assign_optimal(fewer_rows)
+check('more detections than tracked points: assigns exactly 3', len(r) == 3 and len(c) == 3, (r, c))
+
+# --- track_centroids: synthetic case, 5 points where slot 1 and slot 2 gradually swap places
+# (real characters RUN between positions over several frames; a one-frame teleport is not a fair
+# test of a velocity tracker - two positions that are simply occupied, with no motion in between,
+# are genuinely indistinguishable from "nobody moved", which is correct, not a bug) ---
+start_row = [(65, 140), (145, 140), (225, 140), (305, 140), (385, 140)]
+end_row = [(145, 140), (65, 140), (225, 140), (305, 140), (385, 140)]  # 1 and 2 swapped
+times = np.linspace(0.0, 1.0, 12)
+dets = []
+for t in times:
+    f = min(1.0, t / 0.8)
+    dets.append([(65 + f * 80, 140), (145 - f * 80, 140), (225, 140), (305, 140), (385, 140)])
+ans, info = jochul.track_centroids(times, dets, start_slot=1)
+check('synthetic swap (gradual motion): the slot-1 character is tracked to its new slot (2)', ans == 2, (ans, info))
+
+# a start/end row that's never found (always scattered) returns None, not a crash or a guess
+scattered = [[(100, 300)], [(120, 310)]]
+ans, info = jochul.track_centroids(np.array([0.0, 0.5]), scattered, start_slot=1)
+check('no usable row -> None, not a silent wrong guess', ans is None, (ans, info))
+
+# --- real labelled round: the one actual client capture confirmed correct by the user ---
+try:
+    import torch  # noqa: F401
+    from ultralytics import YOLO  # noqa: F401
+    HAVE_MODEL = True
+except Exception:
+    HAVE_MODEL = False
+
+if not HAVE_MODEL:
+    print('SKIP real-round test (torch/ultralytics not installed in this interpreter)')
+else:
+    import cv2
+    fdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'jochul_round1')
+    meta = json.load(open(os.path.join(fdir, 'meta.json'), encoding='utf-8'))
+    frames = [cv2.imread(os.path.join(fdir, '%05d.jpg' % i)) for i in range(meta['frames'])]
+    rtimes = np.array(meta['times'])
+    model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               'assets', 'models', 'jochul', 'jochul.pt')
+    solver = jochul.JochulSolver(model_path)
+    solver.preload()
+    ans, info = solver.solve_tracked(frames, rtimes, meta['first'])
+    check('real client round: tracker reaches the user-confirmed correct slot',
+          ans == meta['truth'], (ans, meta['truth'], info))
+    # the swap-model decoders are kept only as a secondary signal - documenting here that they
+    # got this SAME round wrong, so a future change must not quietly swap back to trusting them alone
+    per_std, per_sens = solver._detect_missing(frames)
+    old_ops = jochul.periodic_decode(jochul._resample_uniform(per_std, rtimes.tolist()),
+                                      per_frame_sens=jochul._resample_uniform(per_sens, rtimes.tolist()))
+    old_order = jochul.apply_swaps(old_ops)
+    old_ans = old_order.index(meta['first']) + 1 if meta['first'] in old_order else None
+    print('(for reference) periodic_decode on this same round answers %s (wrong) - not used for the click' % old_ans)
+
+print('FAILED: %s' % fails if fails else 'all passed')
+sys.exit(1 if fails else 0)

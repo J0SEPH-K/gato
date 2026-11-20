@@ -74,3 +74,31 @@ The pink-skin screenshot shows the gold-colour reveal read fails there; in that 
 - Offline tracker (dev/tools/jochul_replay.py) on this round: YOLO detections + velocity Hungarian -> slot 5 in 8/9 settings at
   44 fps, 7/9 at 22 fps and at 11 fps; blob foreground -> 3/9. Agreement with the truth on ONE round only.
 - Needed before changing the macro: more labelled rounds (copy `debug/jochul_rounds`, label by watching the video).
+
+## Replaced the swap-model decoder with a velocity/Hungarian centroid tracker as the live answer (2026-11-20)
+Ran the actual solver code (not an offline experiment) against the ONE real, user-confirmed-correct client
+round (start slot 2, true end slot 5): BOTH swap-model decoders got it WRONG, under every tuning tried
+(`periodic_decode` on the 15fps-resampled grid -> 1; `dp_decode`, time-based, period range widened up to 3 s
+-> 3 or 4, never 5). The live macro's earlier "correct" click with this exact algorithm was therefore very
+likely luck (n=1, 20% baseline), not the solver working, which matches the user calling the success rate
+"so shit".
+
+A much simpler method already written for offline replay - velocity-predicted Hungarian matching of the
+YOLO detector's own centroids (`jochul.track_centroids`, ported from `dev/tools/jochul_replay.py`'s
+`track()`, scipy replaced with a tiny brute-force 5x5-ish assignment since scipy is not bundled in the app) -
+got this SAME round right in all 9 parameter combinations tried (gate in {100,150,220} x decay in
+{0.6,0.8,0.95}), both with scipy and with the ported scipy-free assignment, and even on a 1-in-5 subsampled
+version of the capture (207 of the 1033 frames). This is now the PRIMARY live answer
+(`JochulSolver.solve_tracked`, wired into `brain._handle_jochul_inner`). `periodic_decode` is still run and
+logged for comparison on every round (and a mismatch between the two triggers the same frame-dump/upload
+path as before), but it no longer decides the click.
+
+The capture feeding the solve step changed too: `jochul.record()` (old, fixed 15 fps / 13.5 s polling loop)
+was replaced with `jochul.record_all()` (same all-native-frame capture the evidence recorder already used),
+since the tracker needs real motion, not a coarse sample.
+
+Caveat: n=1 confirmed round. 9/9 parameter robustness on that one case is evidence of being clearly less
+fragile than the swap decoders (which were wrong AND unstable across tunings), not a proven accuracy number.
+A real hit rate still needs many more labelled live rounds - every round keeps recording as before
+(`debug/jochul_rounds`), and the fixture `dev/fixtures/jochul_round1` now also serves as a permanent
+regression test (`dev/test_jochul_tracker.py`) so this exact real case can never silently regress.

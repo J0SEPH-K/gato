@@ -294,6 +294,30 @@ class JochulSolver:
             return (None, ops)
         else:
             return (order.index(first_slot) + 1, ops)
+
+    def detect_centroids(self, frames, conf=0.20):
+        """Per-frame list of (x, y) character centroids from the YOLO detector (not the missing-tile
+        logic): the input `track_centroids` needs."""
+        import torch
+        use_cuda = torch.cuda.is_available()
+        out = [[] for _ in frames]
+        for s in range(0, len(frames), BATCH):
+            batch = frames[s:s + BATCH]
+            results = self.model.predict(source=batch, conf=conf, imgsz=IMG_SIZE,
+                                          device=0 if use_cuda else 'cpu', max_det=10, iou=0.45, verbose=False)
+            for bi, res in enumerate(results):
+                b = res.boxes
+                if b is None or len(b) == 0:
+                    continue
+                xyxy = b.xyxy.cpu().numpy()
+                out[s + bi] = [((x[0] + x[2]) / 2, (x[1] + x[3]) / 2) for x in xyxy]
+        return out
+
+    def solve_tracked(self, frames, times, first_slot, conf=0.20, gate=150.0, decay=0.8):
+        """Primary live answer (see the note above TRACK_SLOT_X): velocity-predicted Hungarian
+        tracking of the YOLO detector's own centroids through the whole scatter."""
+        dets = self.detect_centroids(frames, conf=conf)
+        return track_centroids(times, dets, first_slot, gate=gate, decay=decay)
     def _detect_missing(self, frames):
         import torch
         use_cuda = torch.cuda.is_available()
@@ -459,6 +483,90 @@ def resample_vote(per_frame, times, fps=FPS):
         if 0 <= k < n_grid and det is not None:
             cells[k].append(det)
     return [Counter(c).most_common(1)[0][0] if c else None for c in cells]
+
+
+# ---------------------------------------------------------------------------------------------
+# LIVE TRACKER-BASED SOLVER (2026-11-20): the swap-model decoders above (periodic_decode, dp_decode)
+# both got the one real, user-confirmed round WRONG (start 2, true end 5) no matter how they were
+# tuned. A simple velocity-predicted Hungarian-matching tracker on the YOLO detector's own centroids
+# (not background-subtraction blobs, which score much worse) got that SAME round right in all 9
+# parameter combinations tried. This is therefore the primary live answer; periodic_decode/dp_decode
+# are kept only as a secondary signal recorded for comparison, not used to choose the click.
+# n=1 confirmed round: this is evidence of being less wrong, not a proven accuracy number. Every
+# future round must still be recorded and labelled so the real hit rate can be measured.
+# ---------------------------------------------------------------------------------------------
+TRACK_SLOT_X = np.array([65, 145, 225, 305, 385], float)  # board-crop coords of the 5 slots
+TRACK_ROW_Y = 140.0
+
+
+def _assign_optimal(cost):
+    """Optimal assignment for a small, possibly RECTANGULAR cost matrix (5 tracked points x however
+    many detections this frame has, which is often not exactly 5) by brute force over permutations
+    of the larger side, so the live app does not need to bundle scipy for this 5-ish x 5-ish problem."""
+    import itertools
+    n_r, n_c = cost.shape
+    best_cost, best_rows, best_cols = None, None, None
+    if n_r <= n_c:
+        for cols in itertools.permutations(range(n_c), n_r):
+            c = sum(cost[i, cols[i]] for i in range(n_r))
+            if best_cost is None or c < best_cost:
+                best_cost, best_rows, best_cols = c, tuple(range(n_r)), cols
+    else:
+        for rows in itertools.permutations(range(n_r), n_c):
+            c = sum(cost[rows[j], j] for j in range(n_c))
+            if best_cost is None or c < best_cost:
+                best_cost, best_rows, best_cols = c, rows, tuple(range(n_c))
+    return np.array(best_rows), np.array(best_cols)
+
+
+def _in_row(pts):
+    return len(pts) >= 5 and np.std([p[1] for p in pts]) < 14 and abs(np.median([p[1] for p in pts]) - TRACK_ROW_Y) < 40
+
+
+def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
+    """dets: per-frame list of (x, y) character centroids (from the YOLO detector, not background
+    blobs). Returns (final slot 1-5 of the character that started at start_slot, info string), or
+    (None, reason) if no usable start/end row was found."""
+    s = next((i for i, d in enumerate(dets) if _in_row(d)), None)
+    e = next((i for i in range(len(dets) - 1, -1, -1) if _in_row(dets[i])), None)
+    if s is None or e is None or e <= s:
+        return None, 'no start/end row found'
+    pos = np.array(sorted(dets[s], key=lambda p: p[0])[:5] if len(dets[s]) == 5
+                   else sorted(dets[s], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
+    pos = pos[np.argsort(pos[:, 0])]
+    vel = np.zeros((5, 2))
+    last = times[s]
+    coast = 0
+    for i in range(s + 1, e + 1):
+        dt = max(1e-3, times[i] - last)
+        last = times[i]
+        pred = pos + vel * min(dt, 0.25)
+        D = np.array(dets[i]).reshape(-1, 2) if len(dets[i]) else np.zeros((0, 2))
+        if len(D):
+            C = np.linalg.norm(pred[:, None, :] - D[None, :, :], axis=2)
+            C = np.where(C > gate, 1e4, C)
+            r, c = _assign_optimal(C)
+            matched = set()
+            for a, b in zip(r, c):
+                if C[a, b] < 1e4:
+                    vel[a] = 0.35 * vel[a] + 0.65 * np.clip((D[b] - pos[a]) / dt, -400, 400)
+                    pos[a] = D[b]
+                    matched.add(a)
+            for a in range(5):
+                if a not in matched:
+                    pos[a] = pred[a]
+                    vel[a] *= decay
+                    coast += 1
+        else:
+            pos = pred
+            vel *= decay
+            coast += 5
+    fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
+    fin = fin[np.argsort(fin[:, 0])]
+    C = np.linalg.norm(pos[:, None, :] - fin[None, :, :], axis=2)
+    r, c = _assign_optimal(C)
+    m = {int(a): int(b) + 1 for a, b in zip(r, c)}
+    return m.get(start_slot - 1), 'ok (coasted %d track-frames)' % coast
 
 
 class RoundRecorder:
