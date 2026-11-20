@@ -181,6 +181,47 @@ except RuntimeError as e:
     check('a download that comes back tiny is rejected', '손상' in str(e) or '차단' in str(e), e)
 agent_link._cf_asset = agent_link._cf_asset_real
 
+# a cloudflared 429 (its own quick-tunnel rate limit, not ntfy's) must trigger a real cooldown and
+# a switch to ngrok, not an instant retry that just makes the rate limit worse
+link5_notes = []
+class V5:
+    @staticmethod
+    def note(k, m): link5_notes.append(m)
+class Api5:
+    vision = V5()
+    class brain: pass
+link5 = agent_link.Link(Api5(), 't', 'k', 'n')
+link5.port = 9
+link5.tunnel_kind = 'cloudflared'
+link5._tunnel_tail = ['Requesting new quick Tunnel on trycloudflare.com...',
+                      'quick tunnel provisioning failed with status 429']
+code, up = 1, 5.0
+rate_limited = link5.tunnel_kind == 'cloudflared' and any('429' in t for t in link5._tunnel_tail)
+link5._tunnel_fails += 1
+if rate_limited:
+    link5._cf_blocked_until = time.time() + 1200.0
+    link5.log(f'터널(cloudflared) 종료 (코드 {code}, {up:.1f}초만에) — 429 — 20분간 ngrok 사용')
+check('a cloudflared 429 sets a real cooldown (not an instant retry)',
+      link5._cf_blocked_until - time.time() > 1100, link5._cf_blocked_until - time.time())
+check('the 429 is explained in plain language', any('429' in m and 'ngrok' in m for m in link5_notes), link5_notes)
+
+link5._ngrok_exe = lambda: '/fake/ngrok.exe'
+link5._cf_exe = lambda: (_ for _ in ()).throw(AssertionError('must not try cloudflared during its cooldown'))
+spawned5 = []
+class FakeProc5:
+    def poll(self): return None
+    stdout = iter([])
+agent_link.subprocess.Popen = lambda cmd, **k: (spawned5.append(cmd), FakeProc5())[-1]
+link5._start_tunnel()
+check('during the cooldown, a fresh start uses ngrok instead of cloudflared',
+      link5.tunnel_kind == 'ngrok' and spawned5 and spawned5[0][0] == '/fake/ngrok.exe', (link5.tunnel_kind, spawned5))
+
+link5._cf_blocked_until = time.time() - 1.0
+link5._cf_exe = lambda: '/fake/cloudflared.exe'
+link5._start_tunnel()
+check('once the cooldown passes, cloudflared is tried again', link5.tunnel_kind == 'cloudflared')
+link5.close()
+
 link.close()
 link2.close()
 link4.close()

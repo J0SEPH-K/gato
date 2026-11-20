@@ -121,6 +121,9 @@ class Link:
         self.tunnel = None
         self.tunnel_kind = ''
         self.port = LINK_PORT
+        self._tunnel_fails = 0
+        self._next_start_at = 0.0
+        self._cf_blocked_until = 0.0  # cloudflared rate-limited (HTTP 429): use ngrok for a while
         self.httpd = None
         self._stop = threading.Event()
         self.log = lambda m: api.vision.note('input', f'[링크] {m}')
@@ -293,13 +296,18 @@ class Link:
         return exe
 
     def _start_tunnel(self):
-        """cloudflared; if that fails, ngrok. Whichever wins sets self.url and announces it."""
+        """cloudflared; if that fails, or if it was just rate-limited (HTTP 429 on quick-tunnel
+        provisioning), ngrok for a while instead. Whichever wins sets self.url and announces it."""
+        use_ngrok_now = time.time() < self._cf_blocked_until
         try:
+            if use_ngrok_now:
+                raise RuntimeError('cloudflared 일시 차단 중')
             exe = self._cf_exe()
             self.tunnel_kind = 'cloudflared'
             cmd = [exe, 'tunnel', '--url', f'http://127.0.0.1:{self.port}', '--no-autoupdate']
         except Exception as e:
-            self.log(f'cloudflared 준비 실패 ({type(e).__name__}) — ngrok 로 대체')
+            if not use_ngrok_now:
+                self.log(f'cloudflared 준비 실패 ({type(e).__name__}) — ngrok 로 대체')
             exe = self._ngrok_exe()
             self.tunnel_kind = 'ngrok'
             cmd = [exe, 'http', str(self.port), '--log=stdout', '--authtoken', self.ngrok_token]
@@ -322,6 +330,7 @@ class Link:
                     url = m.group(0 if self.tunnel_kind == 'cloudflared' else 1)
                     if url != self.url:
                         self.url = url
+                        self._tunnel_fails = 0
                         self.log(f'터널({self.tunnel_kind}) {url}')
                         threading.Thread(target=self._announce_verified, daemon=True).start()
                 if 'ERR_NGROK' in line or 'failed to' in line.lower() or 'error' in line.lower():
@@ -448,10 +457,25 @@ class Link:
                         code = self.tunnel.poll()
                         up = time.time() - getattr(self, '_tunnel_started_at', time.time())
                         tail = ' | '.join(self._tunnel_tail[-2:]) if self._tunnel_tail else '(출력 없음)'
-                        self.log(f'터널({self.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]} — 재시작')
+                        rate_limited = self.tunnel_kind == 'cloudflared' and any(
+                            '429' in t or 'rate' in t.lower() for t in self._tunnel_tail)
+                        self._tunnel_fails += 1
+                        if rate_limited:
+                            # a real quota, not a one-off glitch: use ngrok for 20 min instead of
+                            # hammering cloudflare's provisioning endpoint and making it worse
+                            self._cf_blocked_until = time.time() + 1200.0
+                            backoff = 10.0
+                            self.log(f'터널(cloudflared) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]} '
+                                     f'— 요청 제한(429) 감지, 20분간 ngrok 사용')
+                        else:
+                            backoff = min(120.0, 5.0 * (2 ** min(self._tunnel_fails - 1, 5)))
+                            self.log(f'터널({self.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]}'
+                                     f' — {backoff:.0f}초 후 재시작')
+                        self._next_start_at = time.time() + backoff
                     self.url = ''
-                    self._start_tunnel()
-                    bad_public = 0
+                    if time.time() >= self._next_start_at:
+                        self._start_tunnel()
+                        bad_public = 0
                 elif self.url:
                     if self._public_ok():
                         bad_public = 0
