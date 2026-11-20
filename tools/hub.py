@@ -20,6 +20,7 @@ import urllib.request
 TOPIC = os.environ.get('GATO_TOPIC') or 'gato-hub-un6q3wm4tu'
 TOKEN = os.environ.get('GATO_TOKEN') or 'mt4hjwtg3bj5pc4npa3o3w5rfgu4tk2c'
 STALE_SEC = 150.0
+RECENT_SEC = 3 * 3600.0   # keep this long in the state file so 'last seen' works
 STATE = os.path.expanduser('~/.gato_hub/state.json')
 UA = {'user-agent': 'gato-hub/1', 'ngrok-skip-browser-warning': '1'}
 
@@ -40,9 +41,9 @@ def _save(s):
     os.replace(tmp, STATE)
 
 
-def poll():
+def poll(keep_sec=RECENT_SEC):
     try:
-        req = urllib.request.Request(f'https://ntfy.sh/{TOPIC}/json?poll=1&since=30m', headers=UA)
+        req = urllib.request.Request(f'https://ntfy.sh/{TOPIC}/json?poll=1&since={int(keep_sec // 60) + 1}m', headers=UA)
         raw = urllib.request.urlopen(req, timeout=25).read().decode('utf-8', 'replace')
     except Exception as e:
         print(f'# rendezvous unreachable: {type(e).__name__}: {e}', file=sys.stderr)
@@ -62,9 +63,9 @@ def poll():
         st[d['machine']] = {'pc': d.get('pc', '?'), 'url': d['url'], 'ver': d.get('ver', '?'),
                             'seen': float(m.get('time') or time.time())}
     now = time.time()
-    live = {k: v for k, v in st.items() if now - v['seen'] < STALE_SEC}
-    _save(live)
-    return live
+    st = {k: v for k, v in st.items() if now - v['seen'] < keep_sec}
+    _save(st)
+    return {k: v for k, v in st.items() if now - v['seen'] < STALE_SEC}
 
 
 def _pick(name, live):
@@ -114,6 +115,13 @@ def main(argv):
     if cmd == 'list':
         if not live:
             print('no PC is up (nothing announced in the last %d s)' % STALE_SEC)
+            recent = _state()
+            for v in sorted(recent.values(), key=lambda x: -x['seen'])[:6]:
+                print(f"  last seen {int(time.time() - v['seen']) // 60}m ago: {v['pc']} v{v['ver']}")
+            if recent:
+                print('  (the app announces every 25 s while it runs - one that stopped is closed or crashed)')
+            else:
+                print('  (no PC has ever announced on this topic)')
             return 0
         for k, v in sorted(live.items(), key=lambda x: x[1]['pc']):
             try:
