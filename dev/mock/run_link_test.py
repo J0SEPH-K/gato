@@ -71,6 +71,40 @@ live = fake_poll(time.time(), [0, hub.STALE_SEC + 60])
 check('a silent PC drops out after STALE_SEC', len(live) == 1 and list(live.values())[0]['pc'] == 'A', live)
 live = fake_poll(time.time(), [0, 0])
 check('picking by machine id and by name both work', hub._pick('m2', live)['pc'] == 'B' and hub._pick('a', live)['pc'] == 'A')
+# status() must never raise: a half-initialised Api (no monster, brain without counters) is normal
+class Raising:
+    def __getattr__(self, k): raise RuntimeError('brain not built')
+class Bare:
+    class vision:
+        @staticmethod
+        def snapshot(): raise RuntimeError('no vision')
+    brain = Raising()
+link2 = agent_link.Link(Bare(), 't', 'k', 'n')
+link2.pc = 'PC-BARE'
+st = link2.status()
+check('status survives a half-built Api', st['pc'] == 'PC-BARE' and st['running'] is False and st['battles'] == 0, st)
+check('status names the brain problem instead of raising', 'err' in st and 'brain' in st['err'], st)
+class NoBrain:
+    pass
+check('status survives a missing brain entirely', agent_link.Link(NoBrain(), 't', 'k', 'n').status()['battles'] == 0)
+
+ver = os.path.join(config.BASE_DIR, 'VERSION')
+open(ver, 'w').write('9.9.9\n')
+check('_ver reads VERSION from the writable dir too', agent_link._ver() == '9.9.9', agent_link._ver())
+os.remove(ver)
+check('_ver never raises when VERSION is missing', agent_link._ver() in ('?', ''), agent_link._ver())
+
+calls = {'n': 0}
+class Boom:
+    def read(self): return b'{"error":"x"}'
+def flaky(req, timeout=0):
+    calls['n'] += 1
+    if calls['n'] < 3:
+        raise urllib.error.HTTPError(req.full_url, 500, 'boom', {}, Boom())
+    return type('R', (), {'read': lambda self: b'ok', '__enter__': lambda self: self, '__exit__': lambda *a: False})()
+hub.urllib.request.urlopen = flaky
+check('hub.get retries a 500 then succeeds', hub.get({'pc': 'P', 'url': 'https://x'}, '/status', timeout=1) == b'ok' and calls['n'] == 3, calls)
 link.close()
+link2.close()
 print('FAILED: %s' % fails if fails else 'all passed')
 sys.exit(1 if fails else 0)

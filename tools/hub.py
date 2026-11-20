@@ -76,10 +76,29 @@ def _pick(name, live):
     raise SystemExit(f'no live PC matching {name!r} (see: hub.py list)')
 
 
-def get(v, path, timeout=30):
-    req = urllib.request.Request(v['url'] + path, headers={**UA, 'x-gato-token': TOKEN})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+def get(v, path, timeout=30, tries=3):
+    """Quick tunnels are sometimes slow on the first request after an idle period, so a timeout
+    or 5xx is retried. A 401 is not: that is a real token mismatch."""
+    last = None
+    for i in range(tries):
+        req = urllib.request.Request(v['url'] + path, headers={**UA, 'x-gato-token': TOKEN})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            body = ''
+            try:
+                body = e.read().decode('utf-8', 'replace')[:200]
+            except Exception:
+                pass
+            last = f'HTTP {e.code} {body}'.strip()
+            if e.code < 500:
+                raise SystemExit(f'{v["pc"]}: {last}')
+        except Exception as e:
+            last = f'{type(e).__name__}: {e}'
+        if i < tries - 1:
+            time.sleep(4 * (i + 1))
+    raise RuntimeError(f'{v["pc"]}: {last}')
 
 
 def post(v, path, obj, timeout=30):

@@ -18,6 +18,7 @@ datas = [
     ('ui', 'ui'),
     ('assets', 'assets'),
     ('settings.default.json', '.'),
+    ('VERSION', '.'),
 ] + collect_data_files('ultralytics')
 
 a = Analysis(
