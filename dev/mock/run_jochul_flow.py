@@ -53,7 +53,7 @@ check('tile visible: first tile found', any('첫 마패: 2번' in n for n in not
 check('parked cursor first', parks and parks[0] == jochul.PARK_XY)
 check('recorded ~13.5 s of frames at ~15 fps', 150 <= solved.get('n', 0) <= 215, solved)
 check('answer 4 -> two clicks at x=%d' % jochul.CLICK_X[4], len(clicks) == 2 and all(c[2] == jochul.CLICK_X[4] and c[3] == jochul.CLICK_Y for c in clicks), clicks)
-check('passed message logged', any('조철 통과' in n for n in notes))
+check('popup-closed message logged (not called a pass)', any('조철 클릭 후 창 닫힘' in n for n in notes))
 print('  flow took %.1f s' % el)
 rd = os.path.join(config.BASE_DIR, 'debug', 'jochul_rounds')
 dirs = sorted(os.listdir(rd)) if os.path.isdir(rd) else []

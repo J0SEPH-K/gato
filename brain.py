@@ -1614,21 +1614,24 @@ class Brain:
                         hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
                         meta['fg_after'] = _fg_info()
                         self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x})')
-                        time.sleep(3.0)
+                        time.sleep(0.9)
                         try:
-                            # self-labelling: after the answer the game shows the 마패 above the real holder
+                            # after the click the clicked character turns green and the 마패 shows over it for ~1.7 s,
+                            # then the board closes (real round, 44 fps). Read it NOW, not 3 s later. Recorded as evidence
+                            # only: the game closes the board for right and wrong clicks alike, so this is NOT a pass signal.
                             _rf = cap()
                             if _rf is not None:
                                 meta['reveal_slot'] = jochul.find_marker_slot(jochul.crop_region(_rf))
                                 meta['start_slot'] = first
                         except Exception:
                             pass
+                        time.sleep(2.1)
                         present = _popup_present()
                         meta['attempts'].append(bool(present))
                         passed = not present
                         meta['passed'] = passed
                         if passed:
-                            self._log(f'{p}조철 통과')
+                            self._log(f'{p}조철 클릭 후 창 닫힘 (정답 여부는 게임이 알려주지 않음 — 확인 불가)')
                             if dump:
                                 self._write_meta(dump, meta)
                         else:
