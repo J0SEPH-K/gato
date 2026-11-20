@@ -21,6 +21,13 @@ TOPIC = os.environ.get('GATO_TOPIC') or 'gato-hub-un6q3wm4tu'
 TOKEN = os.environ.get('GATO_TOKEN') or 'mt4hjwtg3bj5pc4npa3o3w5rfgu4tk2c'
 STALE_SEC = 150.0
 RECENT_SEC = 12 * 3600.0  # ntfy.sh's public cache only retains messages for ~12h anyway
+
+# Test traffic from developing this feature on the Mac: ntfy.sh caches messages for ~12h, so these
+# keep reappearing in every poll for a while even though they were never a real client PC. Filtered
+# out by exact pc name/machine id so they don't clutter `list`.
+TEST_PCS = {'MAC-SELFTEST', 'PC-ONE', 'PC-TWO', 'PC-QUOTA-TEST', 'test'}
+TEST_MACHINE_PREFIXES = ('mac-', 'm1', 'm2', 'm-one', 'm-two', 'm-quota', 'mach-test')
+TEST_MACHINE_SUFFIXES = ('.local',)  # a bare macOS hostname: never a Windows client PC
 STATE = os.path.expanduser('~/.gato_hub/state.json')
 UA = {'user-agent': 'gato-hub/1', 'ngrok-skip-browser-warning': '1'}
 
@@ -59,6 +66,8 @@ def poll(keep_sec=RECENT_SEC):
         except Exception:
             continue
         if not d.get('machine') or not d.get('url'):
+            continue
+        if d.get('pc') in TEST_PCS or str(d['machine']).startswith(TEST_MACHINE_PREFIXES) or str(d['machine']).endswith(TEST_MACHINE_SUFFIXES):
             continue
         st[d['machine']] = {'pc': d.get('pc', '?'), 'url': d['url'], 'ver': d.get('ver', '?'),
                             'seen': float(m.get('time') or time.time())}
