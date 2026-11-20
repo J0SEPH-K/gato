@@ -521,6 +521,7 @@ class Brain:
                     self._notify_img(msg, frame)
                     if stop and self._shutdown_at is None:
                             self._shutdown_at = time.time() + STOP_GRACE
+                            self._stop_reason = '배경 급변 (맵 이동/영자 소환 의심)'
                 else:
                     self._log(f'배경 유사도 {sim:.2f}')
             self._prev_main = field
@@ -895,6 +896,7 @@ class Brain:
             return
         else:
             self._shutdown_at = time.time() + STOP_GRACE
+            self._stop_reason = reason or '(사유 없음)'
             if reason:
                 self._notify(f'{reason} — {STOP_GRACE:.0f}초 후 정지')
     def _stop_now(self, reason: str=''):
@@ -1916,7 +1918,7 @@ class Brain:
                     except Exception:
                         pass
                     if self._shutdown_at is not None and time.time() >= self._shutdown_at:
-                        self._log('정지')
+                        self._log('정지 — 사유: ' + str(getattr(self, '_stop_reason', '?')))
                         self.running = False
                         return
                     else:
