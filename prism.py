@@ -90,6 +90,12 @@ class Api:
         except Exception as _e:
             self.link = None
             self.vision.note('input', f'[링크] 설치 실패 — {type(_e).__name__}: {_e}')
+        try:
+            import update
+            self.updater = update.install(self)   # frozen builds only; None in a source checkout
+        except Exception as _e:
+            self.updater = None
+            self.vision.note('input', f'[업데이트] 설치 실패 — {type(_e).__name__}: {_e}')
     _CHAT_NOTIFY_KEY = {'귓말': 'notify_whisper', '일반': 'notify_normal', '반복': 'notify_repeat'}
     def _on_chat(self, kind: str, name: str, msg: str) -> None:
         # ***<module>.Api._on_chat: Failure: Different control flow

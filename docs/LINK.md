@@ -27,3 +27,10 @@ announces itself to a fixed ntfy topic. The Mac polls that topic and can talk to
 bookkeeping (two PCs at once, staleness drop, picking by id/prefix).
 End-to-end on this Mac with two fake instances: both got their own port and their own tunnel,
 both appeared in the hub, status/shot/cmd worked on each.
+
+## Auto-update
+`update.py`, installed next to the link: frozen builds only, first check 90 s after launch, then every 6 h.
+Public release repo, no token. Picks the newest release, refuses a wrong size or SHA256, waits until the bot is
+idle, then a detached .cmd runs the installer `/VERYSILENT /CLOSEAPPLICATIONS` and relaunches the app.
+`python3 dev/mock/run_update_test.py` covers version compare, asset pick, both integrity gates, the
+frozen-only guard and the apply script.

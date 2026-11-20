@@ -8,7 +8,7 @@ hidden = (
     ['win32timezone', 'clr', 'clr_loader', 'pythonnet', 'webview.platforms.winforms',
      'windows_capture', 'scapy.all', 'websockets', 'cryptography']
     # modules the app imports lazily or by name
-    + ['agf', 'autosupply', 'captcha', 'chat', 'remote_link', 'agent_link', 'second_pw', 'sniffer', 'traders_ctl',
+    + ['agf', 'autosupply', 'captcha', 'chat', 'remote_link', 'agent_link', 'update', 'second_pw', 'sniffer', 'traders_ctl',
        'watchdog', 'sprite_match', 'notify', 'net', 'dpi', 'wgc']
     # YOLO checkpoints unpickle classes from these packages at load time
     + collect_submodules('ultralytics')
