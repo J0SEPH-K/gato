@@ -1511,18 +1511,34 @@ class Brain:
             if park:
                 hands.move_nofg(*jochul.PARK_XY, wait=True)
             time.sleep(jochul.FIRST_TILE_DELAY)
-            frame = cap()
+            # The first-tile marker can take a few frames to appear; look for up to ~1 s instead of
+            # giving up (and stopping) on the first miss. The shuffle clock below is kept aligned.
+            _t_ref = time.time()
+            frame, first = None, None
+            for _try in range(8):
+                frame = cap()
+                if frame is not None:
+                    first = jochul.find_first_tile(jochul.crop_region(frame))
+                    if first is not None:
+                        break
+                if time.time() - _t_ref > 1.0:
+                    break
+                time.sleep(0.1)
             if frame is None:
                 self._log(f'{p}조철: 캡처 실패')
                 return
             else:
-                first = jochul.find_first_tile(jochul.crop_region(frame))
                 if first is None:
+                    try:
+                        os.makedirs(config.JOCHUL_FAIL_DIR, exist_ok=True)
+                        cv2.imwrite(os.path.join(config.JOCHUL_FAIL_DIR, time.strftime('first_tile_miss_%H%M%S.png')), frame)
+                    except Exception:
+                        pass
                     self._stop_now(f'{p}조철 첫 마패 인식 실패')
                     return
                 else:
                     self._log(f'{p}조철 첫 마패: {first}번')
-                    time.sleep(jochul.SHUFFLE_DELAY)
+                    time.sleep(max(0.0, jochul.SHUFFLE_DELAY - (time.time() - _t_ref)))
                     rec_hwnd = hwnd or self.engine.hwnd or find_window()
                     rec_cap = (lambda: grab_hwnd(rec_hwnd)) if rec_hwnd else self._cap
                     frames, times = jochul.record(rec_cap)

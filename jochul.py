@@ -219,7 +219,10 @@ def periodic_decode(per_frame, period=PERIOD, n_ops=N_OPS, per_frame_sens=None):
                     if v and len(v) == 2:
                             ps = set(v)
                             compat += sum((1 for t in items if ps.issubset(set(t))))
-                viol = sum((1 for a, b in zip(ops, ops[1:]) if not a or not b or len(a) == 2 and (len(b) == 2) and set(a) & set(b)))
+                # Only two valid swaps that share a tile count as a violation (a tile cannot be in two
+                # consecutive swaps). An undecided block (None) is NOT a violation: the decompiled
+                # source had `not a or not b or ...` here, which the original bytecode does not do.
+                viol = sum((1 for a, b in zip(ops, ops[1:]) if a and b and len(a) == 2 and (len(b) == 2) and set(a) & set(b)))
                 key = (-viol, bnd_none, compat)
                 if best is None or key > best[0]:
                     best = (key, ops, block_items, p, phi)

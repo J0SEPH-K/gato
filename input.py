@@ -241,6 +241,7 @@ class Hands:
             if not hwnd:
                 return False
             else:
+                self._pin = None     # explicit park: the cursor guard must not drag it back to the last click point
                 try:
                     user32.SetCursorPos(*self._to_screen(hwnd, x, y))
                 except Exception:
