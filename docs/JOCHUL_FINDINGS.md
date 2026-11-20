@@ -61,3 +61,16 @@ board region, to `debug/jochul_rounds/round_<time>/` (`NNNNN.jpg` + `meta.json`:
 reveal slot, effective fps, capture mode). Last 40 rounds are kept, ~30-50 MB each. Disable with `jochul_record: false`.
 To tune: copy the folder to the Mac and run `python dev/tools/jochul_replay.py <folder>` (tracker vs reveal labels).
 The pink-skin screenshot shows the gold-colour reveal read fails there; in that case label by eye from the last frames.
+
+## First live round on 1.0.1 (client PC, 2026-11-20 15:37, native 44.4 fps, 1033 frames, wgc-every-frame)
+- Start slot 2 (medallion rule found it on this skin: 3 votes). Macro decoded 15 swaps, clicked slot 5.
+- Ground truth: slot 5 (user watched the recorded video and confirmed the macro was correct). n = 1, so this proves nothing about
+  the solver: a random click is right 20% of the time.
+- After the click: the clicked character turns green, the 마패 shows over it, the board closes ~1.7 s later. The macro's reveal read
+  was moved from +3 s to +0.9 s because the board is already gone at +3 s. The old "popup gone = passed" check is not a
+  correctness signal (the board closes either way; unverified whether a wrong click looks different).
+- Detector on native-fps frames: Ultralytics `jochul.pt` finds all 5 in the row at the start/end (100%), 4.5 of 5 per frame in
+  the scatter (58% of frames show all 5). Background-blob foreground: only 2.3 blobs per frame.
+- Offline tracker (dev/tools/jochul_replay.py) on this round: YOLO detections + velocity Hungarian -> slot 5 in 8/9 settings at
+  44 fps, 7/9 at 22 fps and at 11 fps; blob foreground -> 3/9. Agreement with the truth on ONE round only.
+- Needed before changing the macro: more labelled rounds (copy `debug/jochul_rounds`, label by watching the video).
