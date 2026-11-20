@@ -1,0 +1,35 @@
+name: build-installer
+on:
+  workflow_dispatch: {}
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Create venv and install pinned requirements
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
+      - name: Build (PyInstaller, selftest gate, Inno Setup)
+        shell: pwsh
+        run: |
+          .\build_windows.ps1
+          if (-not (Test-Path 'dist-installer\GatoSetup.exe')) { throw 'GatoSetup.exe missing' }
+          Get-FileHash 'dist-installer\GatoSetup.exe' -Algorithm SHA256 | Format-List
+      - name: Show selftest
+        if: always()
+        shell: pwsh
+        run: Get-Content "$env:LOCALAPPDATA\GATO\selftest.txt" -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GatoSetup
+          path: dist-installer/GatoSetup.exe
+          compression-level: 0
+          retention-days: 7
