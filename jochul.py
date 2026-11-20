@@ -48,6 +48,31 @@ def find_first_tile(region_img):
             if x <= limit:
                 return slot
         return 5
+def find_marker_slot(region_img):
+    """Slot (1-5) under the floating gold 마패 medallion, or None. Skin-independent: it looks for the
+    medallion's colour, not for the character sprite (the pixel pattern in find_first_tile is the
+    navy hair of one skin). The medallion bobs, so call it on several frames and vote (see vote_marker)."""
+    import cv2
+    hsv = cv2.cvtColor(np.ascontiguousarray(region_img), cv2.COLOR_BGR2HSV)
+    m = ((hsv[..., 0] >= 14) & (hsv[..., 0] <= 30) & (hsv[..., 1] >= 140) & (hsv[..., 2] >= 170)).astype(np.uint8)
+    n, _, st, cen = cv2.connectedComponentsWithStats(m, 8)
+    best = None
+    for i in range(1, n):
+        a = int(st[i, 4])
+        if 60 <= a <= 900 and (best is None or a > best[0]):
+            best = (a, float(cen[i][0]))
+    if best is None:
+        return None
+    xs = [CLICK_X[k] - REGION[0] for k in (1, 2, 3, 4, 5)]
+    return 1 + int(np.argmin([abs(best[1] - x) for x in xs]))
+
+
+def vote_marker(slots):
+    """Most common slot among the frames where the medallion was seen (None if never seen)."""
+    seen = [x for x in slots if x]
+    return Counter(seen).most_common(1)[0][0] if seen else None
+
+
 def record(capture_fn, fps=FPS, duration=DURATION_S):
     interval = 1.0 / fps
     total = int(fps * duration)

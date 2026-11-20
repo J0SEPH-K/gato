@@ -1515,15 +1515,24 @@ class Brain:
             # giving up (and stopping) on the first miss. The shuffle clock below is kept aligned.
             _t_ref = time.time()
             frame, first = None, None
-            for _try in range(8):
+            _marker_seen, _pattern_seen = [], []
+            for _try in range(45):
                 frame = cap()
                 if frame is not None:
-                    first = jochul.find_first_tile(jochul.crop_region(frame))
-                    if first is not None:
+                    _reg = jochul.crop_region(frame)
+                    _pattern_seen.append(jochul.find_first_tile(_reg))
+                    # skin-independent: the gold 마패 medallion floating over the marked character
+                    _marker_seen.append(jochul.find_marker_slot(_reg))
+                    _mv = jochul.vote_marker(_marker_seen)
+                    if _mv and _marker_seen.count(_mv) >= 3:
                         break
-                if time.time() - _t_ref > 1.0:
+                if time.time() - _t_ref > 1.6:
                     break
-                time.sleep(0.1)
+                time.sleep(0.04)
+            _mv, _pv = jochul.vote_marker(_marker_seen), jochul.vote_marker(_pattern_seen)
+            first = _mv or _pv
+            if _mv and _pv and _mv != _pv:
+                self._log(f'{p}조철 첫 마패: 메달 {_mv}번 / 색상패턴 {_pv}번 불일치 — 메달 우선')
             if frame is None:
                 self._log(f'{p}조철: 캡처 실패')
                 return
@@ -1581,6 +1590,14 @@ class Brain:
                         meta['fg_after'] = _fg_info()
                         self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x})')
                         time.sleep(3.0)
+                        try:
+                            # self-labelling: after the answer the game shows the 마패 above the real holder
+                            _rf = cap()
+                            if _rf is not None:
+                                meta['reveal_slot'] = jochul.find_marker_slot(jochul.crop_region(_rf))
+                                meta['start_slot'] = first
+                        except Exception:
+                            pass
                         present = _popup_present()
                         meta['attempts'].append(bool(present))
                         passed = not present
