@@ -283,11 +283,19 @@ class Link:
             self.tunnel_kind = 'ngrok'
             cmd = [exe, 'http', str(self.port), '--log=stdout', '--authtoken', self.ngrok_token]
         flags = 0x08000000 if os.name == 'nt' else 0
-        self.tunnel = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                       creationflags=flags, text=True, encoding='utf-8', errors='replace')
+        self._tunnel_started_at = time.time()
+        self._tunnel_tail = []
+        try:
+            self.tunnel = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                           creationflags=flags, text=True, encoding='utf-8', errors='replace')
+        except Exception as e:
+            self.log(f'{self.tunnel_kind} 실행 실패 — {type(e).__name__}: {e} (exe={cmd[0]})')
+            raise
 
         def _reader():
             for line in self.tunnel.stdout:
+                self._tunnel_tail.append(line.rstrip())
+                self._tunnel_tail[:] = self._tunnel_tail[-8:]
                 m = (CF_URL_RE if self.tunnel_kind == 'cloudflared' else NGROK_URL_RE).search(line)
                 if m:
                     url = m.group(0 if self.tunnel_kind == 'cloudflared' else 1)
@@ -295,7 +303,7 @@ class Link:
                         self.url = url
                         self.log(f'터널({self.tunnel_kind}) {url}')
                         threading.Thread(target=self._announce_verified, daemon=True).start()
-                if 'ERR_NGROK' in line or 'failed to' in line.lower():
+                if 'ERR_NGROK' in line or 'failed to' in line.lower() or 'error' in line.lower():
                     self.log(line.strip()[:160])
         threading.Thread(target=_reader, daemon=True).start()
 
@@ -416,7 +424,10 @@ class Link:
                     bad_local = 0
                 if self.tunnel is None or self.tunnel.poll() is not None:
                     if self.tunnel is not None:
-                        self.log('터널 종료 — 재시작')
+                        code = self.tunnel.poll()
+                        up = time.time() - getattr(self, '_tunnel_started_at', time.time())
+                        tail = ' | '.join(self._tunnel_tail[-2:]) if self._tunnel_tail else '(출력 없음)'
+                        self.log(f'터널({self.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]} — 재시작')
                     self.url = ''
                     self._start_tunnel()
                     bad_public = 0

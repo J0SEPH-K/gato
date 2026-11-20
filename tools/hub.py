@@ -26,7 +26,7 @@ RECENT_SEC = 12 * 3600.0  # ntfy.sh's public cache only retains messages for ~12
 # keep reappearing in every poll for a while even though they were never a real client PC. Filtered
 # out by exact pc name/machine id so they don't clutter `list`.
 TEST_PCS = {'MAC-SELFTEST', 'PC-ONE', 'PC-TWO', 'PC-QUOTA-TEST', 'test'}
-TEST_MACHINE_PREFIXES = ('mac-', 'm1', 'm2', 'm-one', 'm-two', 'm-quota', 'mach-test')
+TEST_MACHINE_PREFIXES = ('mac-', 'm-one', 'm-two', 'm-quota', 'mach-test')
 TEST_MACHINE_SUFFIXES = ('.local',)  # a bare macOS hostname: never a Windows client PC
 STATE = os.path.expanduser('~/.gato_hub/state.json')
 UA = {'user-agent': 'gato-hub/1', 'ngrok-skip-browser-warning': '1'}

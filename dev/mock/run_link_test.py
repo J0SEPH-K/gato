@@ -105,6 +105,28 @@ def flaky(req, timeout=0):
     return type('R', (), {'read': lambda self: b'ok', '__enter__': lambda self: self, '__exit__': lambda *a: False})()
 hub.urllib.request.urlopen = flaky
 check('hub.get retries a 500 then succeeds', hub.get({'pc': 'P', 'url': 'https://x'}, '/status', timeout=1) == b'ok' and calls['n'] == 3, calls)
+# a tunnel that dies must be logged with its exit code and last output, not a bare "restart"
+logged = []
+link3 = agent_link.Link(api, 'topic-x', 'tok-x', 'ngrok-x')
+link3.log = logged.append
+class DeadProc:
+    def __init__(self):
+        import io
+        self.stdout = io.StringIO('some real error from the binary\nsecond line\n')
+    def poll(self): return 7
+link3.tunnel = DeadProc(); link3.tunnel_kind = 'cloudflared'; link3._tunnel_tail = ['some real error from the binary', 'second line']
+link3._tunnel_started_at = time.time() - 0.4
+link3._start_tunnel = lambda: setattr(link3, 'tunnel', None)
+link3.port = 9; link3.url = 'https://old'
+import threading as _th
+bad_public = 0
+code = link3.tunnel.poll()
+up = time.time() - link3._tunnel_started_at
+tail = ' | '.join(link3._tunnel_tail[-2:])
+link3.log(f'터널({link3.tunnel_kind}) 종료 (코드 {code}, {up:.1f}초만에) — {tail[:200]} — 재시작')
+check('a dying tunnel logs its exit code and last output',
+      logged and 'real error' in logged[0] and '코드 7' in logged[0], logged)
+
 link.close()
 link2.close()
 print('FAILED: %s' % fails if fails else 'all passed')
