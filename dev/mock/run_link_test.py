@@ -7,6 +7,7 @@ import numpy as np
 import mock_loop as m
 import config
 config.BASE_DIR = tempfile_dir = __import__('tempfile').mkdtemp(prefix='gato_link_')
+config.RES_DIR = config.BASE_DIR
 import agent_link, hub
 
 fails = []

@@ -287,10 +287,22 @@ class Link:
                     if url != self.url:
                         self.url = url
                         self.log(f'터널({self.tunnel_kind}) {url}')
-                        threading.Thread(target=self._announce, daemon=True).start()
+                        threading.Thread(target=self._announce_verified, daemon=True).start()
                 if 'ERR_NGROK' in line or 'failed to' in line.lower():
                     self.log(line.strip()[:160])
         threading.Thread(target=_reader, daemon=True).start()
+
+    def _announce_verified(self, tries=8):
+        """Hold the announcement until the tunnel answers from outside, so the hub never gets a
+        URL that is not usable yet."""
+        for _ in range(tries):
+            if self._stop.is_set() or not self.url:
+                return
+            if self._public_ok():
+                self._announce()
+                return
+            time.sleep(3.0)
+        self._announce()
 
     def _announce(self):
         if not self.url:
@@ -323,14 +335,84 @@ class Link:
         threading.Thread(target=self._loop, daemon=True).start()
         self.log(f'링크 시작 (포트 {self.port})')
 
+    def _local_ok(self):
+        """Is our own HTTP server answering? A tunnel over a dead origin just returns 502."""
+        try:
+            req = urllib.request.Request(f'http://127.0.0.1:{self.port}/ping',
+                                         headers={'x-gato-token': self.token})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    def _public_ok(self):
+        """Does the tunnel actually reach us from outside? Only a real request proves it:
+        cloudflared prints its URL before the route is ready, and a half-open tunnel keeps
+        announcing while every request 502s."""
+        if not self.url:
+            return False
+        try:
+            req = urllib.request.Request(self.url + '/ping',
+                                         headers={'user-agent': 'gato-link/1',
+                                                  'ngrok-skip-browser-warning': '1',
+                                                  'x-gato-token': self.token})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    def _rebind(self):
+        try:
+            if self.httpd is not None:
+                self.httpd.shutdown()
+                self.httpd.server_close()
+        except Exception:
+            pass
+        self.httpd = None
+        for port in range(LINK_PORT, LINK_PORT + 20):
+            try:
+                self.httpd = ThreadingHTTPServer(('127.0.0.1', port), self._handler())
+                self.httpd.daemon_threads = True
+                self.port = port
+                threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+                return True
+            except OSError:
+                continue
+        return False
+
     def _loop(self):
+        bad_local = 0
+        bad_public = 0
         while not self._stop.wait(ANNOUNCE_SEC if self.url else 5.0):
             try:
+                if not self._local_ok():
+                    bad_local += 1
+                    if bad_local >= 2:
+                        self.log('로컬 서버 무응답 — 다시 엶')
+                        if not self._rebind():
+                            self.log(f'포트 {LINK_PORT}~ 사용 불가')
+                        bad_local = 0
+                else:
+                    bad_local = 0
                 if self.tunnel is None or self.tunnel.poll() is not None:
                     if self.tunnel is not None:
                         self.log('터널 종료 — 재시작')
                     self.url = ''
                     self._start_tunnel()
+                    bad_public = 0
+                elif self.url:
+                    if self._public_ok():
+                        bad_public = 0
+                    else:
+                        bad_public += 1
+                        if bad_public >= 2:
+                            self.log(f'터널 무응답 {bad_public}회 — 새 터널')
+                            try:
+                                self.tunnel.terminate()
+                            except Exception:
+                                pass
+                            self.url = ''
+                            bad_public = 0
                 self._announce()
             except Exception as e:
                 self.log(f'{type(e).__name__}: {e}')
