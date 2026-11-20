@@ -45,3 +45,12 @@ and now also stores `start_slot` and `reveal_slot` in its meta, so each round la
 - New skin (pink twin-tail girls, user screenshot): `jochul.pt` finds all 5 (class 0, conf 0.86-0.93) - the model already
   covers more than one skin. The gold-colour medallion rule (V >= 170, area >= 60) does NOT find the medallion in that
   screenshot (darker, smaller): the start-slot rule is validated only on the 2020 clip's rendering.
+
+## Design note from the user (another model's advice), assessed 2026-11-20
+Proposal: clean background plate (or MOG2 with learningRate 0) + top-5 blobs + constant-velocity prediction + Hungarian
+matching + coasting while blobs merge + `mss` capture at 60-120 fps + key by template match.
+- Already tried on the real clip (Hungarian tracker, min-cost flow, MOG2/median + Norfair): chance level at ~11 fps.
+- Untested and still plausible: the same pipeline at 60+ fps live. The only thing not yet measured.
+- Does not fit this game as written: no fixed clean plate (hay-bale positions differ per round), "5 largest blobs" breaks when
+  animals cross, the key template must not depend on the skin.
+- Next step stays: native-fps rounds with `start_slot`/`reveal_slot` labels, then replay on the Mac.
