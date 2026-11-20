@@ -14,4 +14,9 @@ sc = lambda: {"scene": "battle" if 9 < time.time() - t0 < 13 else "main", "trigg
 b, hands, notes, alive = m.run_scenario("B", 20, [[520, 340]], sc)
 stopped = any("정지" in n[1] and "더미" in n[1] for n in notes)
 print("B: stopped by dummy rule:", stopped)
-sys.exit(1 if (not skipped or stopped) else 0)
+
+# Scenario C (seen live at 15:35): 14 s of unanswered clicks + skip must not trip the 30 s no-fight stop
+b, hands, notes, alive = m.run_scenario("C", 38, [[520, 340]])
+early_stop = [n for n in notes if "팅 의심" in n[1] and n[0] - notes[0][0] < 40.0]
+print("C: 30 s no-fight stop before the skip window ended:", bool(early_stop))
+sys.exit(1 if (not skipped or stopped or early_stop) else 0)

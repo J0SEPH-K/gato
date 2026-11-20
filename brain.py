@@ -2008,6 +2008,9 @@ class Brain:
                                                                                 self._log(f'더미몹 의심 — 재클릭 {dummy_guard.clicks}회, 응답 없음 {time.time() - (dummy_guard.first_t or time.time()):.0f}초 ({detector.DummyGuard.MIN_SECONDS:.0f}초 넘으면 건너뜀)')
                                                                             elif verdict == 'skip':
                                                                                 self._log('더미몹 판정 — 이 자리를 45초간 건너뛰고 계속 사냥')
+                                                                                # we were actively clicking for 15 s: that is not a disconnect, so the
+                                                                                # 30 s "no fight = 팅 의심" clock must not run through this
+                                                                                self._no_battle_count = 0
                                                                             elif verdict == 'stop':
                                                                                 self._stop_bot('더미몹 반복 (건너뛰어도 전투 미진입)')
                                                                         last_click_n = loop_n
