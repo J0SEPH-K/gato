@@ -84,6 +84,12 @@ class Api:
         except Exception as _e:
             self.remote = None
             self.vision.note('input', f'[원격링크] 설치 실패 — {type(_e).__name__}: {_e}')
+        try:
+            import agent_link
+            self.link = agent_link.install(self)   # always-on link to the Mac; None when disabled
+        except Exception as _e:
+            self.link = None
+            self.vision.note('input', f'[링크] 설치 실패 — {type(_e).__name__}: {_e}')
     _CHAT_NOTIFY_KEY = {'귓말': 'notify_whisper', '일반': 'notify_normal', '반복': 'notify_repeat'}
     def _on_chat(self, kind: str, name: str, msg: str) -> None:
         # ***<module>.Api._on_chat: Failure: Different control flow
@@ -1020,6 +1026,8 @@ def main():
         api.bot_poller.stop()
         if getattr(api, 'remote', None):
             api.remote.close()
+        if getattr(api, 'link', None):
+            api.link.close()
     cfg0 = config.load()
     win_w, win_h = Api._clamp_size(cfg0.get('win_w', WIN_DEF_W), cfg0.get('win_h', WIN_DEF_H)) or (WIN_DEF_W, WIN_DEF_H)
     try:
