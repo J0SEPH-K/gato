@@ -34,3 +34,14 @@ sits in the last ~4.5 s, same detector. NOT checked by eye (the image-descriptio
 ## What is needed for a real solver
 Real-rate (60 fps) capture of live rounds. `brain._handle_jochul` already saves every failed round to `debug/jochul_fail`
 and now also stores `start_slot` and `reveal_slot` in its meta, so each round labels itself.
+
+## More attempts on the same six rounds (2026-11-20, later)
+- Ultralytics built-in trackers (ByteTrack, BoT-SORT) on `jochul.pt`, 256/640 px: identities are reassigned 160-300 times per
+  round, the start character's id never survives to the end (0/4 on the rounds with a certain end slot).
+- OpenCV MOG2 (and a median background) + Norfair Kalman tracker, 32 parameter settings: best 1/4 = chance. In the scatter the
+  foreground gives only ~2-4 separate blobs per frame (characters overlap each other and animals), so tracks die and are
+  re-created (60-120 ids per round).
+- Caveat for all of these: the clip has ~11 distinct frames/s. Live 60 fps footage may track far better; unproven.
+- New skin (pink twin-tail girls, user screenshot): `jochul.pt` finds all 5 (class 0, conf 0.86-0.93) - the model already
+  covers more than one skin. The gold-colour medallion rule (V >= 170, area >= 60) does NOT find the medallion in that
+  screenshot (darker, smaller): the start-slot rule is validated only on the 2020 clip's rendering.
