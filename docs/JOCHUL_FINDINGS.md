@@ -54,3 +54,10 @@ matching + coasting while blobs merge + `mss` capture at 60-120 fps + key by tem
 - Does not fit this game as written: no fixed clean plate (hay-bale positions differ per round), "5 largest blobs" breaks when
   animals cross, the key template must not depend on the skin.
 - Next step stays: native-fps rounds with `start_slot`/`reveal_slot` labels, then replay on the Mac.
+
+## Round recorder (shipped in 1.0.1, 2026-11-20)
+Every 조철 round is now recorded in the background, every distinct frame (WGC frame counter, up to 45/s), JPEG q92 of the
+board region, to `debug/jochul_rounds/round_<time>/` (`NNNNN.jpg` + `meta.json`: times, start slot, answer, marker votes,
+reveal slot, effective fps, capture mode). Last 40 rounds are kept, ~30-50 MB each. Disable with `jochul_record: false`.
+To tune: copy the folder to the Mac and run `python dev/tools/jochul_replay.py <folder>` (tracker vs reveal labels).
+The pink-skin screenshot shows the gold-colour reveal read fails there; in that case label by eye from the last frames.

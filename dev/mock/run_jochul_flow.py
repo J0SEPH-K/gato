@@ -11,8 +11,8 @@ def make(tile_after, marker_slot=None):
     hands = m.FakeHands()
     parks = []
     hands.move_nofg = lambda *a, **k: parks.append(a) or True
-    eng = m.FakeEngine(); eng.hwnd = 0
-    brain.find_window = lambda: 0
+    eng = m.FakeEngine(); eng.hwnd = 1
+    brain.find_window = lambda: 1
     b = brain.Brain(eng, m.FakeVision(), hands, note=lambda s: notes.append(s))
     b.running = True
     solved = {}
@@ -35,6 +35,7 @@ def make(tile_after, marker_slot=None):
                 f[oy + y + dy, ox + x + dx] = c
         return f
     b._cap = cap
+    brain.grab_hwnd = lambda h, normalize=True: cap()    # every grab (solver + recorder) goes through the fake
     return b, hands, notes, parks, solved
 
 fails = []
@@ -42,6 +43,8 @@ def check(name, cond, extra=''):
     print(('PASS ' if cond else 'FAIL ') + name + ('' if cond else ' -- ' + str(extra)))
     if not cond: fails.append(name)
 
+import tempfile, json
+config.BASE_DIR = tempfile.mkdtemp(prefix='gato_rounds_')
 # 1) tile visible at once
 b, hands, notes, parks, solved = make(0.0)
 t = time.time(); b._handle_jochul(); el = time.time() - t
@@ -52,6 +55,13 @@ check('recorded ~13.5 s of frames at ~15 fps', 150 <= solved.get('n', 0) <= 215,
 check('answer 4 -> two clicks at x=%d' % jochul.CLICK_X[4], len(clicks) == 2 and all(c[2] == jochul.CLICK_X[4] and c[3] == jochul.CLICK_Y for c in clicks), clicks)
 check('passed message logged', any('조철 통과' in n for n in notes))
 print('  flow took %.1f s' % el)
+rd = os.path.join(config.BASE_DIR, 'debug', 'jochul_rounds')
+dirs = sorted(os.listdir(rd)) if os.path.isdir(rd) else []
+check('round recording saved', len(dirs) == 1, dirs)
+if dirs:
+    meta = json.load(open(os.path.join(rd, dirs[0], 'meta.json'), encoding='utf-8'))
+    check('recording has frames + times + labels', meta['frames'] > 300 and len(meta['times']) == meta['frames'] and meta.get('answer') == 4 and meta.get('first') == 2, {k: meta.get(k) for k in ('frames', 'answer', 'first', 'mode', 'effective_fps', 'seconds')})
+    check('frame files readable', len([f for f in os.listdir(os.path.join(rd, dirs[0])) if f.endswith('.jpg')]) == meta['frames'])
 
 # 2) marker appears 0.7 s late -> retry finds it, no stop
 b, hands, notes, parks, solved = make(0.5 + 0.7)

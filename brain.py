@@ -1501,6 +1501,29 @@ class Brain:
             self._stop_now(f'{label} 솔버 미준비')
             return False
     def _handle_jochul(self, hands=None, hwnd=0, tag='', park=True):
+        """Solve one 조철 round; in the background also record EVERY frame of the round with labels
+        (start slot, our answer, where the 마패 reappears) into debug/jochul_rounds for offline tuning."""
+        rec = None
+        self._jochul_meta = {}
+        try:
+            _rh = hwnd or self.engine.hwnd or find_window()
+            if _rh and config.load().get('jochul_record', True):
+                rec = jochul.RoundRecorder(_rh, grab_fn=(lambda: grab_hwnd(_rh))).start()
+        except Exception:
+            rec = None
+        try:
+            return self._handle_jochul_inner(hands, hwnd, tag, park)
+        finally:
+            if rec is not None:
+                try:
+                    time.sleep(0.4)
+                    rec.stop()
+                    d = rec.save(os.path.join(config.BASE_DIR, 'debug', 'jochul_rounds'), self._jochul_meta)
+                    if d:
+                        self._log(f'조철 라운드 녹화 저장 — {len(rec.frames)}프레임 ({rec.mode}) {d}')
+                except Exception:
+                    pass
+    def _handle_jochul_inner(self, hands=None, hwnd=0, tag='', park=True):
         hands = hands or self.hands
         cap = (lambda: grab_hwnd(hwnd)) if hwnd else self._cap
         p = f'[{tag}] ' if tag else ''
@@ -1561,6 +1584,8 @@ class Brain:
                         self._log(f'{p}조철 연산 {n_ops}개(15 기대) → 정답: {answer} (해석 {solve_s:.1f}s)')
                         import net
                         meta = {'ver': net.CODE_VER, 'first': first, 'n_ops': n_ops, 'ops': [list(o) for o in ops], 'order': jochul.apply_swaps(ops), 'answer': answer, 'attempts': [], 'passed': None, 'solve_s': round(solve_s, 2)}
+                        self._jochul_meta = meta
+                        meta['marker_votes'] = {str(k): _marker_seen.count(k) for k in set(_marker_seen) if k}
                         dump = None
                         if n_ops != 15 or answer is None:
                             dump = self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})

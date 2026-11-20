@@ -3,6 +3,7 @@
 # Bytecode version: 3.11a7e (3495)
 # Source timestamp: 2026-08-17 09:30:58 UTC (1786959058)
 
+import threading
 import time
 from collections import Counter
 import numpy as np
@@ -458,3 +459,101 @@ def resample_vote(per_frame, times, fps=FPS):
         if 0 <= k < n_grid and det is not None:
             cells[k].append(det)
     return [Counter(c).most_common(1)[0][0] if c else None for c in cells]
+
+
+class RoundRecorder:
+    """Records every distinct game frame of the board for a whole 조철 round (start to reveal), in the
+    background, JPEG-encoded as it goes (~40 KB a frame), then saves them with times and labels.
+    Purpose: native-fps, self-labelled footage of the CURRENT game for offline tuning on a Mac.
+    Never blocks or alters the solver; every failure is swallowed."""
+    KEEP_ROUNDS = 40
+
+    def __init__(self, hwnd, grab_fn=None, max_fps=MAX_REC_FPS, quality=92, max_seconds=45.0):
+        self.hwnd, self.grab_fn, self.max_fps, self.quality, self.max_seconds = hwnd, grab_fn, max_fps, quality, max_seconds
+        self.frames, self.times = [], []
+        self._stop = threading.Event()
+        self._thread = None
+        self.t0 = None
+        self.mode = None
+
+    def start(self):
+        self.t0 = time.perf_counter()
+        self._thread = threading.Thread(target=self._run, daemon=True, name='jochul-recorder')
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3.0)
+
+    def _run(self):
+        try:
+            import cv2
+            sess = None
+            try:
+                import wgc
+                if wgc.available():
+                    s = wgc._session(self.hwnd)
+                    if s is not None and isinstance(getattr(s, 'frames', None), int):
+                        sess = s
+            except Exception:
+                sess = None
+            self.mode = 'wgc-every-frame' if sess is not None else 'poll-30hz'
+            last_seq, last_t, next_poll = -1, -1.0, time.perf_counter()
+            min_gap = 1.0 / self.max_fps
+            while not self._stop.is_set():
+                now = time.perf_counter()
+                if now - self.t0 > self.max_seconds:
+                    break
+                f = None
+                if sess is not None:
+                    if sess.frames == last_seq or now - self.t0 - last_t < min_gap * 0.9:
+                        time.sleep(0.001)
+                        continue
+                    info = sess.client_frame_info()
+                    last_seq = sess.frames if info is None else info[2]
+                    f = info[0] if info is not None else None
+                else:
+                    if now < next_poll:
+                        time.sleep(0.002)
+                        continue
+                    next_poll = now + 1.0 / 30.0
+                    f = self.grab_fn() if self.grab_fn else None
+                if f is None:
+                    continue
+                if (f.shape[1], f.shape[0]) != (REF_W, REF_H):
+                    f = cv2.resize(f, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+                ok, buf = cv2.imencode('.jpg', crop_region(f), [cv2.IMWRITE_JPEG_QUALITY, self.quality])
+                if ok:
+                    last_t = time.perf_counter() - self.t0
+                    self.frames.append(buf.tobytes())
+                    self.times.append(round(last_t, 4))
+        except Exception:
+            pass
+
+    def save(self, base_dir, meta):
+        import json
+        import os
+        import shutil
+        try:
+            if not self.frames:
+                return None
+            os.makedirs(base_dir, exist_ok=True)
+            d = os.path.join(base_dir, time.strftime('round_%Y%m%d_%H%M%S'))
+            os.makedirs(d, exist_ok=True)
+            for i, b in enumerate(self.frames):
+                with open(os.path.join(d, '%05d.jpg' % i), 'wb') as fh:
+                    fh.write(b)
+            m = dict(meta)
+            m.update({'times': self.times, 'frames': len(self.frames), 'mode': self.mode, 'region': list(REGION),
+                      'seconds': round(self.times[-1], 2) if self.times else 0,
+                      'effective_fps': round(len(self.frames) / max(0.1, self.times[-1]), 1) if self.times else 0})
+            with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as fh:
+                json.dump(m, fh, ensure_ascii=False, default=str)
+            dirs = sorted(x for x in os.listdir(base_dir) if x.startswith('round_'))
+            for old in dirs[:-self.KEEP_ROUNDS]:
+                shutil.rmtree(os.path.join(base_dir, old), ignore_errors=True)
+            return d
+        except Exception:
+            return None
