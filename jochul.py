@@ -313,11 +313,32 @@ class JochulSolver:
                 out[s + bi] = [((x[0] + x[2]) / 2, (x[1] + x[3]) / 2) for x in xyxy]
         return out
 
-    def solve_tracked(self, frames, times, first_slot, conf=0.20, gate=150.0, decay=0.8):
+    ENSEMBLE_SETTINGS = [(100.0, 0.6), (100.0, 0.95), (150.0, 0.8), (220.0, 0.6), (220.0, 0.95)]
+
+    def solve_tracked(self, frames, times, first_slot, conf=0.20, settings=None):
         """Primary live answer (see the note above TRACK_SLOT_X): velocity-predicted Hungarian
-        tracking of the YOLO detector's own centroids through the whole scatter."""
+        tracking of the YOLO detector's own centroids through the whole scatter.
+
+        Detection (the slow ~5 s part) runs ONCE; the tracker then runs over several (gate, decay)
+        settings on that same detection set (cheap - this adds well under 1 s) and votes. Confirmed
+        9/9 agreement on the one real labelled round at the single default setting; voting across
+        settings makes a FUTURE round that is less clean say 'uncertain' instead of confidently
+        picking whichever setting happened to run, which is the harder failure mode to catch.
+        Returns (answer_or_None, info_string). answer is None when there is no majority.
+        """
         dets = self.detect_centroids(frames, conf=conf)
-        return track_centroids(times, dets, first_slot, gate=gate, decay=decay)
+        votes = []
+        for gate, decay in (settings or self.ENSEMBLE_SETTINGS):
+            ans, _ = track_centroids(times, dets, first_slot, gate=gate, decay=decay)
+            votes.append(ans)
+        counts = Counter(v for v in votes if v is not None)
+        if not counts:
+            return None, f'no setting found a usable start/end row (votes={votes})'
+        top, n_top = counts.most_common(1)[0]
+        info = f'ensemble {dict(counts)} of {len(votes)}'
+        if n_top * 2 <= len(votes):   # no majority (ties, or scattered votes) - do not guess
+            return None, f'no majority - {info}'
+        return top, info
     def _detect_missing(self, frames):
         import torch
         use_cuda = torch.cuda.is_available()

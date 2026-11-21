@@ -7,6 +7,7 @@ import os
 import sys
 
 import numpy as np
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -78,6 +79,18 @@ else:
     ans, info = solver.solve_tracked(frames, rtimes, meta['first'])
     check('real client round: tracker reaches the user-confirmed correct slot',
           ans == meta['truth'], (ans, meta['truth'], info))
+
+    t0 = __import__('time').perf_counter()
+    ens_ans, ens_info = solver.solve_tracked(frames, rtimes, meta['first'])
+    ens_dt = __import__('time').perf_counter() - t0
+    check('ensemble vote also reaches the correct slot, well inside the 10 s answer timer',
+          ens_ans == meta['truth'] and ens_dt < 9.0, (ens_ans, ens_dt, ens_info))
+
+    # a case with no usable row at all in ANY setting must come back as "uncertain" (None), not a guess
+    no_data = [[] for _ in frames]
+    solver.detect_centroids = lambda frames, conf=0.20: no_data
+    ans2, info2 = solver.solve_tracked(frames, rtimes, meta['first'])
+    check('no usable detections anywhere -> uncertain (None), not a silent guess', ans2 is None, (ans2, info2))
     # the swap-model decoders are kept only as a secondary signal - documenting here that they
     # got this SAME round wrong, so a future change must not quietly swap back to trusting them alone
     per_std, per_sens = solver._detect_missing(frames)
