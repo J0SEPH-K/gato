@@ -20,14 +20,17 @@ $mods = @('agf', 'autosupply', 'captcha', 'chat', 'remote_link', 'agent_link', '
           'combat', 'detector', 'capture', 'input', 'vision', 'brain', 'prism', 'config', 'jochul')
 # 'webview' is deliberately absent: pywebview ships its own Nuitka plugin, and also listing it as a
 # user include-package makes Nuitka abort with "Conflict between user and plugin decision".
+# 'scapy' is imported lazily inside sniffer.py, so static analysis never sees it and it has to be
+# listed by hand or the chat sniffer is silently absent from the build.
 $pkgs = @('websockets', 'cryptography', 'windows_capture', 'pythonnet', 'clr_loader', 'comtypes',
-          'uiautomation', 'win32com', 'win32timezone', 'psutil', 'certifi', 'requests')
+          'uiautomation', 'win32com', 'win32timezone', 'psutil', 'certifi', 'requests', 'scapy')
 
 # Everything below is followed automatically from our own imports; the heavy ones are additionally
 # pruned because MSVC-compiling all of torch/scapy/ultralytics takes hours. torch's own Nuitka plugin
 # still supplies its DLLs and package data. The selftest gate after the build proves nothing broke.
 $nofollow = @(
-    'torch.testing', 'torch.distributed', 'torch.utils.tensorboard', 'torch.utils.benchmark',
+    # torch.distributed is imported unconditionally by torch/__init__.py, so it cannot be pruned.
+    'torch.testing', 'torch.utils.tensorboard', 'torch.utils.benchmark',
     'torch.utils.data.datapipes', 'torch._dynamo', 'torch._inductor', 'torch._export', 'torch.ao',
     'torch.onnx', 'torch.jit', 'torch.fx', 'torch.multiprocessing',
     'torchvision.datasets', 'torchvision.io', 'torchvision.models.video',
@@ -56,6 +59,9 @@ $nargs = @(
     '--include-data-file=VERSION=VERSION',
     # Torch JIT has to be decided explicitly or Nuitka warns; we only do eager CPU inference.
     '--module-parameter=torch-disable-jit=yes',
+    # A pruned module that something imports anyway should raise at import time, not hard-fail the
+    # whole build with an ImportError that looks like a compiler bug.
+    '--no-deployment-flag=excluded-module-usage',
     '--low-memory'
 )
 foreach ($m in $mods) { $nargs += "--include-module=$m" }
