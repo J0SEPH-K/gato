@@ -20,9 +20,21 @@ $mods = @('agf', 'autosupply', 'captcha', 'chat', 'remote_link', 'agent_link', '
           'combat', 'detector', 'capture', 'input', 'vision', 'brain', 'prism', 'config', 'jochul')
 # 'webview' is deliberately absent: pywebview ships its own Nuitka plugin, and also listing it as a
 # user include-package makes Nuitka abort with "Conflict between user and plugin decision".
-$pkgs = @('ultralytics', 'torch', 'torchvision', 'scapy', 'websockets', 'cryptography',
-          'windows_capture', 'pythonnet', 'clr_loader', 'comtypes', 'uiautomation', 'win32com',
-          'win32timezone', 'psutil', 'certifi', 'requests')
+$pkgs = @('websockets', 'cryptography', 'windows_capture', 'pythonnet', 'clr_loader', 'comtypes',
+          'uiautomation', 'win32com', 'win32timezone', 'psutil', 'certifi', 'requests')
+
+# Everything below is followed automatically from our own imports; the heavy ones are additionally
+# pruned because MSVC-compiling all of torch/scapy/ultralytics takes hours. torch's own Nuitka plugin
+# still supplies its DLLs and package data. The selftest gate after the build proves nothing broke.
+$nofollow = @(
+    'torch.testing', 'torch.distributed', 'torch.utils.tensorboard', 'torch.utils.benchmark',
+    'torch.utils.data.datapipes', 'torch._dynamo', 'torch._inductor', 'torch._export', 'torch.ao',
+    'torch.onnx', 'torch.jit', 'torch.fx', 'torch.multiprocessing',
+    'torchvision.datasets', 'torchvision.io', 'torchvision.models.video',
+    'scapy.contrib', 'scapy.layers.tls',
+    'ultralytics.trackers', 'ultralytics.models.rtdetr',
+    'tkinter', 'matplotlib', 'pytest', 'IPython', 'notebook', 'setuptools', 'pip'
+)
 
 $nargs = @(
     '-m', 'nuitka',
@@ -42,10 +54,13 @@ $nargs = @(
     '--include-data-dir=assets=assets',
     '--include-data-file=settings.default.json=settings.default.json',
     '--include-data-file=VERSION=VERSION',
-    '--nofollow-import-to=tkinter,matplotlib,pytest,IPython,notebook'
+    # Torch JIT has to be decided explicitly or Nuitka warns; we only do eager CPU inference.
+    '--module-parameter=torch-disable-jit=yes',
+    '--low-memory'
 )
 foreach ($m in $mods) { $nargs += "--include-module=$m" }
 foreach ($p in $pkgs) { $nargs += "--include-package=$p" }
+foreach ($n in $nofollow) { $nargs += "--nofollow-import-to=$n" }
 $nargs += 'run_gato.py'
 
 Write-Host '== Nuitka =='
