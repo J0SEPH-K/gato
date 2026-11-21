@@ -18,7 +18,9 @@ if ($LASTEXITCODE -ne 0) { throw 'pip install nuitka failed' }
 $mods = @('agf', 'autosupply', 'captcha', 'chat', 'remote_link', 'agent_link', 'update', 'second_pw',
           'sniffer', 'traders_ctl', 'watchdog', 'sprite_match', 'notify', 'net', 'dpi', 'wgc',
           'combat', 'detector', 'capture', 'input', 'vision', 'brain', 'prism', 'config', 'jochul')
-$pkgs = @('ultralytics', 'torch', 'torchvision', 'scapy', 'websockets', 'cryptography', 'webview',
+# 'webview' is deliberately absent: pywebview ships its own Nuitka plugin, and also listing it as a
+# user include-package makes Nuitka abort with "Conflict between user and plugin decision".
+$pkgs = @('ultralytics', 'torch', 'torchvision', 'scapy', 'websockets', 'cryptography',
           'windows_capture', 'pythonnet', 'clr_loader', 'comtypes', 'uiautomation', 'win32com',
           'win32timezone', 'psutil', 'certifi', 'requests')
 
