@@ -58,7 +58,7 @@ class Api:
         self.notifier = Notifier(get_discord=lambda: config.load().get('discord_webhook', ''), get_ntfy=lambda: config.load().get('ntfy_url', ''), get_tag=lambda: getattr(self, 'auth_id', '') or 'Gato_super', log=lambda s: self.vision.note('input', s))
         self.auth = net.AuthClient()
         self.auth_id = os.environ.get('GATOSUPER_AUTH_ID', '').strip() or config.load().get('auth_id', '')
-        self.brain = Brain(self.engine, self.vision, self.hands, note=lambda m: self.vision.note('brain', m), notify=lambda s: self.vision.note('input', s), notify_img=self.notifier.text, report_battle=self.auth.report_battle, report_appear=self.auth.report_appear, on_stopped=self._on_brain_stopped, banja_ok=lambda: self.auth.banja, no_battle_limit=lambda: self.auth.no_battle_limit, debug_jochul=self.auth.upload_jochul_debug, debug_jamun=self.auth.upload_jamun_debug, debug_jamun_wrong=self.auth.report_jamun_wrong, auth_id=lambda: self.auth.auth_id if self.auth.ok else '')
+        self.brain = Brain(self.engine, self.vision, self.hands, note=lambda m: self.vision.note('brain', m), notify=lambda s: self.vision.note('input', s), notify_img=self.notifier.text, report_battle=self.auth.report_battle, report_appear=self.auth.report_appear, on_stopped=self._on_brain_stopped, banja_ok=lambda: self.auth.banja, no_battle_limit=lambda: self.auth.no_battle_limit, debug_jochul=self.auth.upload_jochul_debug, debug_jamun=self.auth.upload_jamun_debug, debug_jamun_wrong=self.auth.report_jamun_wrong, auth_id=lambda: self.auth.auth_id if self.auth.ok else '', on_auto_restart=self._auto_restart_bot)
         self._start_auth()
         self.bot_poller = BotPoller(get_token=lambda: config.load().get('discord_token', ''), get_channel=lambda: config.load().get('discord_channel', ''), on_message=self._on_discord_command, log=lambda s: self.vision.note('input', s), poll=2.0)
         self.bot_poller.start()
@@ -434,11 +434,11 @@ class Api:
         self.brain.stop()
         self.engine.stop()
         self.hands.release_all()
-    def stop_grace(self, author='', reason=''):
+    def stop_grace(self, author='', reason='', user_requested=True):
         self._sched_stop.set()
         self._sched['active'] = False
         self._sched['resting'] = False
-        self.brain._stop_bot(reason or (f'■ 원격 정지({author})' if author else '■ 원격 정지'))
+        self.brain._stop_bot(reason or (f'■ 원격 정지({author})' if author else '■ 원격 정지'), user_requested=user_requested)
     def schedule_start(self, cycles, battles, rest_sec):
         def _result(ok, reason=''):
             status = self.status()
@@ -533,6 +533,18 @@ class Api:
     def _on_brain_stopped(self):
         self.engine.stop()
         self.hands.release_all()
+    def _auto_restart_bot(self):
+        """The bot stopped itself (a false no-fight timeout, a transient capture glitch, etc. - never
+        a user/schedule stop, see Brain._auto_restart). Run the SAME sequence F3/the panel start button
+        does, not just brain.start(): the engine was already stopped by _on_brain_stopped above, and
+        the game window needs re-focusing."""
+        self.vision.note('input', '[자동재시작] 재시작 시도')
+        try:
+            res = self.start()
+            if not self.brain.running:
+                self.vision.note('input', f'[자동재시작] 실패 — {self.brain.start_block_reason() or self.auth.label()}')
+        except Exception as e:
+            self.vision.note('input', f'[자동재시작] 오류: {type(e).__name__}: {e}')
     _WINS_TTL = 2.0
     def _find_windows_cached(self):
         now = time.time()
@@ -663,7 +675,7 @@ class Api:
                 was_ok = self.auth.ok
                 if not self.auth.heartbeat() and was_ok:
                     if self.brain.running:
-                        self.stop_grace(reason=f'인증 끊김 — {self.auth.label()}')
+                        self.stop_grace(reason=f'인증 끊김 — {self.auth.label()}', user_requested=False)
                     else:
                         self.vision.note('input', f'인증 끊김 — {self.auth.label()} → 정지')
                         self.stop()

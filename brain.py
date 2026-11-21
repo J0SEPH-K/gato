@@ -163,6 +163,9 @@ POPUP_CROP = (348, 322, 764, 452)
 STOP_NOW_TRIGGERS = {'팅(시스템 팝업)'}
 DIGIT_GUARD_SEC = 10.0
 STOP_GRACE = 8.0
+AUTO_RESTART_DELAY_SEC = 10.0
+AUTO_RESTART_WINDOW_SEC = 600.0
+AUTO_RESTART_MAX_IN_WINDOW = 4
 NO_BATTLE_LIMIT = 300
 NO_FRAME_STOP_SEC = 3.0
 JAMUN_INPUT_XY = (500, 425)
@@ -205,7 +208,7 @@ class BattleIO:
 class Brain:
     INTERVAL = 1.0 / 60.0   # loop pacing target; the loop actually waits for each NEW captured frame
     TICK_UNITS = 0.1        # old 10 Hz loop period: loop-count constants are kept in these units
-    def __init__(self, engine, vision, hands, note=print, notify=None, notify_img=None, report_battle=None, report_appear=None, on_stopped=None, banja_ok=None, no_battle_limit=None, debug_jochul=None, debug_jamun=None, debug_jamun_wrong=None, auth_id=None):
+    def __init__(self, engine, vision, hands, note=print, notify=None, notify_img=None, report_battle=None, report_appear=None, on_stopped=None, banja_ok=None, no_battle_limit=None, debug_jochul=None, debug_jamun=None, debug_jamun_wrong=None, auth_id=None, on_auto_restart=None):
         self.engine = engine
         self.vision = vision
         self.hands = hands
@@ -213,6 +216,11 @@ class Brain:
         self._notify_push = notify or (lambda msg: None)
         self._notify_img = notify_img or (lambda msg, img: None)
         self._on_stopped = on_stopped or (lambda: None)
+        self._on_auto_restart = on_auto_restart or (lambda: None)
+        self._auto_restart = True   # cleared by stop() (an explicit/user/schedule stop); every other
+                                    # stop path (_stop_bot/_stop_now - i.e. the bot's OWN decision,
+                                    # such as a false no-fight timeout) leaves this True
+        self._auto_restart_at = []  # timestamps of recent auto-restarts, to cap a crash-loop
         self._report_battle = report_battle or (lambda: None)
         self._report_appear = report_appear or (lambda kind, wrong=False: None)
         self._banja_ok = banja_ok or (lambda: False)
@@ -891,15 +899,17 @@ class Brain:
         self._kill_rank = rows
     def get_kill_rank(self) -> list:
         return getattr(self, '_kill_rank', [])
-    def _stop_bot(self, reason: str=''):
+    def _stop_bot(self, reason: str='', user_requested: bool=False):
         if self._shutdown_at is not None:
             return
         else:
+            self._auto_restart = not user_requested
             self._shutdown_at = time.time() + STOP_GRACE
             self._stop_reason = reason or '(사유 없음)'
             if reason:
                 self._notify(f'{reason} — {STOP_GRACE:.0f}초 후 정지')
     def _stop_now(self, reason: str=''):
+        self._auto_restart = True  # always one of the bot's own crash-like conditions, never a user stop
         self._shutdown_at = None
         self.running = False
         if reason:
@@ -1015,6 +1025,7 @@ class Brain:
             self._thread = threading.Thread(target=self._loop, daemon=True, name='prism-brain')
             self._thread.start()
     def stop(self):
+        self._auto_restart = False  # an explicit/user/schedule stop: never auto-restart this one
         self.running = False
         self.hands.guard_enabled = False
         self.rest_mode = False
@@ -1876,6 +1887,21 @@ class Brain:
                 self._on_stopped()
             except Exception:
                 pass
+            if self._auto_restart:
+                now = time.time()
+                self._auto_restart_at = [t for t in self._auto_restart_at if now - t < AUTO_RESTART_WINDOW_SEC] + [now]
+                if len(self._auto_restart_at) > AUTO_RESTART_MAX_IN_WINDOW:
+                    self._log(f'자동 재시작 중단 — {AUTO_RESTART_WINDOW_SEC:.0f}초 안에 {len(self._auto_restart_at)}회 정지 (반복 정지 의심, 수동 확인 필요)')
+                else:
+                    self._log(f'자동 재시작 — {AUTO_RESTART_DELAY_SEC:.0f}초 후')
+
+                    def _restart_soon():
+                        time.sleep(AUTO_RESTART_DELAY_SEC)
+                        try:
+                            self._on_auto_restart()
+                        except Exception as e:
+                            self._log(f'자동 재시작 실패: {type(e).__name__}: {e}')
+                    threading.Thread(target=_restart_soon, daemon=True, name='auto-restart').start()
 
     def _run_loop(self):
         # ***<module>.Brain._run_loop: Failure: Different control flow
