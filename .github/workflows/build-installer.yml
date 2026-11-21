@@ -48,7 +48,12 @@ jobs:
       - name: Show selftest
         if: always()
         shell: pwsh
-        run: Get-Content "$env:LOCALAPPDATA\GATO\selftest.txt" -ErrorAction SilentlyContinue
+        run: |
+          foreach ($p in @('dist\Gato\selftest.txt', 'distn\run_gato.dist\selftest.txt',
+                           "$env:LOCALAPPDATA\GATO\selftest.txt",
+                           'selftest.stdout.txt', 'selftest.stderr.txt')) {
+            if (Test-Path $p) { Write-Host "--- $p"; Get-Content $p }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: GatoSetup

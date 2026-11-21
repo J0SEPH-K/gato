@@ -153,20 +153,38 @@ def _selftest() -> int:
     import traceback
 
     here = os.path.dirname(os.path.abspath(__file__))
+    # Log next to the exe so the build step can always read it; fall back to the user dir if the
+    # program directory happens to be read-only. Written incrementally so a hard crash still leaves
+    # evidence of how far the run got.
+    log_path = os.path.join(here, "selftest.txt")
+    try:
+        open(log_path, "a", encoding="utf-8").close()
+    except OSError:
+        import config as _c
+
+        log_path = os.path.join(_c.BASE_DIR, "selftest.txt")
+    log = open(log_path, "w", encoding="utf-8")
+
     out = []
     ok = True
+
+    def emit(line):
+        out.append(line)
+        log.write(line + "\n")
+        log.flush()
 
     def step(name, fn):
         nonlocal ok
         t0 = time.time()
         try:
             r = fn()
-            out.append("PASS %-22s %.1fs %s" % (name, time.time() - t0, r if r is not None else ""))
+            emit("PASS %-22s %.1fs %s" % (name, time.time() - t0, r if r is not None else ""))
         except Exception as e:  # noqa: BLE001
             ok = False
-            out.append("FAIL %-22s %s: %s" % (name, type(e).__name__, e))
-            out.append(traceback.format_exc(limit=3))
+            emit("FAIL %-22s %s: %s" % (name, type(e).__name__, e))
+            emit(traceback.format_exc(limit=3).rstrip())
 
+    emit("START %s %s" % (sys.version.split()[0], sys.executable))
     step("frozen", lambda: "yes" if getattr(sys, "frozen", False) else "no (running from source)")
     for mod in ("numpy", "cv2", "torch", "torchvision", "ultralytics", "win32gui", "win32api", "webview",
                 "windows_capture", "psutil", "scapy.all", "websockets", "cryptography"):
@@ -195,17 +213,21 @@ def _selftest() -> int:
 
     step("assets", _assets)
     step("ui", lambda: os.path.getsize(os.path.join(here, "ui", "index.html")))
-    out.append("RESULT " + ("ALL PASS" if ok else "FAILED"))
-    import config as _c
-
-    with open(os.path.join(_c.BASE_DIR, "selftest.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + "\n")
+    emit("RESULT " + ("ALL PASS" if ok else "FAILED"))
+    log.close()
     return 0 if ok else 1
 
 
 def main() -> None:
     if "--selftest" in sys.argv:
-        sys.exit(_selftest())
+        try:
+            code = _selftest()
+        except Exception:  # noqa: BLE001
+            import traceback
+
+            sys.stderr.write(traceback.format_exc())
+            code = 1
+        sys.exit(code)
     print("GATO launcher: running preflight checks...")
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _seed_settings()

@@ -69,8 +69,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Nuitka failed' }
 if (-not (Test-Path 'distn\run_gato.dist\Gato.exe')) { throw 'distn\run_gato.dist\Gato.exe missing' }
 
 Write-Host '== self-test of the compiled app =='
-$st = Start-Process -FilePath 'distn\run_gato.dist\Gato.exe' -ArgumentList '--selftest' -Wait -PassThru
-Get-Content "$env:LOCALAPPDATA\GATO\selftest.txt" -ErrorAction SilentlyContinue
+# The packaged app has no console, so its own selftest log and raw stderr are the only evidence
+# when it dies. Capture both and dump them before deciding.
+$st = Start-Process -FilePath 'distn\run_gato.dist\Gato.exe' -ArgumentList '--selftest' -Wait -PassThru `
+    -RedirectStandardOutput 'selftest.stdout.txt' -RedirectStandardError 'selftest.stderr.txt'
+foreach ($p in @('distn\run_gato.dist\selftest.txt', "$env:LOCALAPPDATA\GATO\selftest.txt")) {
+    if (Test-Path $p) { Write-Host "--- $p"; Get-Content $p }
+}
+foreach ($p in @('selftest.stdout.txt', 'selftest.stderr.txt')) {
+    if ((Test-Path $p) -and (Get-Item $p).Length -gt 0) { Write-Host "--- $p"; Get-Content $p }
+}
+Write-Host "exit code: $($st.ExitCode)"
 if ($st.ExitCode -ne 0) { throw 'compiled self-test failed (see selftest.txt above)' }
 
 # With Nuitka the .py files are compiled, so any copy left in the dist folder is only there for
