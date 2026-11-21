@@ -394,6 +394,9 @@ class Api:
             self.vision.note('input', f'시작 차단 — {self.auth.label()} (로그인 필요)')
             return self.status()
         else:
+            if self.auth.must_update():
+                self.vision.note('input', f'시작 차단 — 업데이트 필요 (최소 {self.auth.min_ver})')
+                return self.status()
             block = self.brain.start_block_reason()
             if block:
                 self.vision.note('input', f'시작 차단 — {block}')
@@ -464,6 +467,9 @@ class Api:
             self.vision.note('input', f'스케쥴 차단 — {self.auth.label()} (로그인 필요)')
             return _result(False, f'{self.auth.label()} (로그인 필요)')
         else:
+            if self.auth.must_update():
+                self.vision.note('input', f'스케쥴 차단 — 업데이트 필요 (최소 {self.auth.min_ver})')
+                return _result(False, f'업데이트 필요 (최소 {self.auth.min_ver})')
             block = self.brain.start_block_reason()
             if block:
                 self.vision.note('input', f'스케쥴 차단 — {block}')
@@ -585,25 +591,37 @@ class Api:
             s['win_w'], s['win_h'] = size
             config.save(s)
     def self_update(self):
-        if os.environ.get('GATOSUPER_LAUNCHED') != '1':
-            return {'ok': False, 'msg': '런처 실행이 아니라 자동 업데이트 불가'}
-        else:
-            if self.brain.running:
-                self.stop()
-            exe = sys.executable
+        """Panel '업데이트' button: download the newest release now and install it."""
+        try:
+            import update
+        except Exception as e:
+            return {'ok': False, 'msg': f'업데이트 모듈 없음: {type(e).__name__}'}
+        if not getattr(sys, 'frozen', False):
+            return {'ok': False, 'msg': '설치본에서만 자동 업데이트됩니다'}
+
+        def _worker():
+            note = lambda m: self.vision.note('input', f'[업데이트] {m}')
             try:
-                subprocess.Popen([exe, '--auto'], cwd=os.path.dirname(exe) or None)
-            except Exception as e:
-                return {'ok': False, 'msg': f'런처 재실행 실패: {type(e).__name__}: {e}'}
-            def _exit_soon():
-                time.sleep(0.8)
+                info = update.check()
+                if not info:
+                    note('새 버전이 없습니다')
+                    return
+                note(f"{info['tag']} 내려받는 중 (현재 {net.APP_VER})")
+                path = update.download(info, note)
+                if self.brain.running:
+                    self.stop()
+                    time.sleep(1.0)
+                update.apply(path, note)
+                time.sleep(6.0)
                 try:
                     self._stop_bot()
                 except Exception:
                     pass
                 os._exit(0)
-            threading.Thread(target=_exit_soon, daemon=True).start()
-            return {'ok': True}
+            except Exception as e:
+                note(f'실패 {type(e).__name__}: {e}')
+        threading.Thread(target=_worker, daemon=True).start()
+        return {'ok': True}
     def status(self):
         s = self.engine.stats()
         s['vision'] = self.vision.snapshot()
@@ -612,7 +630,7 @@ class Api:
         s['auth'] = self.auth_status()
         s['schedule'] = dict(self._sched)
         s['monster'] = config.load().get('current_monster', '')
-        s['update'] = {'available': self.auth.update_available(), 'current': net.CODE_VER, 'latest': self.auth.latest_patch}
+        s['update'] = {'available': self.auth.update_available(), 'forced': self.auth.must_update(), 'current': net.APP_VER, 'latest': self.auth.min_ver}
         wins = self._find_windows_cached()
         s['window_found'] = bool(self.engine.hwnd) if s['running'] else bool(wins)
         s['window_count'] = len(wins)
@@ -658,15 +676,19 @@ class Api:
         return {'dump': on, 'path': path or ''}
     def _start_auth(self):
         def _loop():
+            first = True
             while True:
+                if not first:
+                    time.sleep(net.HEARTBEAT_SEC)
+                first = False
                 self.auth.mob = config.load().get('current_monster', '')
-                if self.auth_id:
+                if self.auth_id and not self.auth.ok:
                     if self.auth.login(self.auth_id):
                         self.vision.note('input', f'인증: {self.auth.label()}')
                         self._pull_settings()
                     else:
                         self.vision.note('input', f'인증 실패 — {self.auth.label()}')
-                time.sleep(net.HEARTBEAT_SEC)
+                        continue
                 if not self.auth.token:
                     continue
                 cfg = config.load()
@@ -679,7 +701,6 @@ class Api:
                     else:
                         self.vision.note('input', f'인증 끊김 — {self.auth.label()} → 정지')
                         self.stop()
-                time.sleep(net.HEARTBEAT_SEC)
 
         threading.Thread(target=_loop, daemon=True).start()
     def login(self, auth_id):

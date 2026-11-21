@@ -1,0 +1,11 @@
+name = "gato-license"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Free plan: 100k requests/day. One heartbeat per client per 60 s => ~70 users.
+# Past that, upgrade to Workers Paid ($5/mo) — no code change.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gato"
+database_id = "7008e508-3198-4941-9cde-e3efcf6f721b"

@@ -17,3 +17,8 @@ build/
 installer/vc_redist.x64.exe
 *.spec.bak
 merc_slots.json
+hwid.txt
+server/node_modules/
+server/.dev.vars
+server/.secrets.txt
+server/.wrangler/

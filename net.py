@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 import base64
+import hashlib
 import json
 import os
 import threading
@@ -18,8 +19,64 @@ try:
     _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 except Exception:
     _SSL_CTX = ssl.create_default_context()
-SERVER = 'https://public2-production.up.railway.app'
+# License backend (Cloudflare Worker, see server/). Override with GATO_SERVER for
+# a local wrangler dev run.
+LICENSE_SERVER = 'https://gato-license.gigan.workers.dev'
+SERVER = os.environ.get('GATO_SERVER', '').strip() or LICENSE_SERVER
 CLIENT_VER = '1.0'
+
+def _app_ver():
+    try:
+        import config as _config
+        with open(os.path.join(_config.RES_DIR, 'VERSION'), encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return CLIENT_VER
+
+APP_VER = _app_ver()
+
+_HWID_PATH = None
+
+def hwid() -> str:
+    """Stable per-machine id: MachineGuid + volume serial + node, hashed. Cached."""
+    global _HWID_PATH
+    try:
+        import config as _config
+        if _HWID_PATH is None:
+            _HWID_PATH = os.path.join(_config.BASE_DIR, 'hwid.txt')
+        with open(_HWID_PATH, encoding='utf-8') as f:
+            cached = f.read().strip()
+        if len(cached) == 32:
+            return cached
+    except Exception:
+        pass
+    parts = []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography') as k:
+            parts.append(str(winreg.QueryValueEx(k, 'MachineGuid')[0]))
+    except Exception:
+        pass
+    try:
+        import ctypes
+        serial = ctypes.c_ulong(0)
+        ctypes.windll.kernel32.GetVolumeInformationW('C:\\', None, 0, ctypes.byref(serial), None, None, None, 0)
+        parts.append(str(serial.value))
+    except Exception:
+        pass
+    try:
+        import uuid
+        parts.append(str(uuid.getnode()))
+    except Exception:
+        pass
+    parts.append(os.environ.get('COMPUTERNAME', '') or 'unknown')
+    value = hashlib.sha256('|'.join(parts).encode('utf-8')).hexdigest()[:32]
+    try:
+        with open(_HWID_PATH, 'w', encoding='utf-8') as f:
+            f.write(value)
+    except Exception:
+        pass
+    return value
 # The original launcher exported this from the signed manifest. Running from source
 # there is no launcher, so fall back to the version the local cache manifest carries
 # (4.56) or the vendor blocks the client as outdated (min_code_version 4.54).
@@ -38,11 +95,11 @@ CODE_VER = os.environ.get('GATOSUPER_CODE_VERSION', '') or _default_code_ver()
 
 # No vendor subscription: auth never gates the bot. Set GATO_LOCAL=0 to use the
 # vendor server again.
-LOCAL = os.environ.get('GATO_LOCAL', '1') != '0'
-HEARTBEAT_SEC = 20
+LOCAL = os.environ.get('GATO_LOCAL', '0') == '1'
+HEARTBEAT_SEC = 60
 TIMEOUT = 6.0
 MAX_NET_FAILS = 3
-REASON_LABELS = {'denied': '미등록 ID', 'revoked': 'ID 삭제됨', 'blocked': '임시차단됨', 'kicked': '다른 곳에서 로그인됨', 'expired': '사용 기한 만료', 'depleted': '사용 횟수 소진', 'outdated': '클라이언트 버전 차단', 'network': '서버 연결 실패'}
+REASON_LABELS = {'denied': '미등록 키', 'unknown': '없는 라이선스 키', 'bad_request': '요청 오류', 'revoked': '키 차단됨', 'blocked': '임시차단됨', 'kicked': '다른 곳에서 로그인됨', 'expired': '사용 기한 만료', 'depleted': '사용 횟수 소진', 'outdated': '업데이트 필요', 'limit': 'PC 대수 초과', 'network': '서버 연결 실패'}
 def _new_session():
     try:
         import certifi as _certifi
@@ -53,6 +110,9 @@ def _new_session():
     try:
         s = _requests.Session()
         s.verify = _certifi.where()
+        # Cloudflare's bot filter answers 403 / error 1010 to the default
+        # python-requests UA, so every client has to announce itself.
+        s.headers.update({'User-Agent': f'GATO/{CLIENT_VER}', 'Accept': 'application/json'})
         ad = HTTPAdapter(pool_connections=4, pool_maxsize=8, max_retries=0)
         s.mount('https://', ad)
         s.mount('http://', ad)
@@ -67,10 +127,19 @@ def _post(path: str, payload: dict, timeout: float=None) -> dict:
         return r.json()
     else:
         data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(SERVER + path, data=data, headers={'Content-Type': 'application/json'})
+        req = urllib.request.Request(SERVER + path, data=data, headers={'Content-Type': 'application/json', 'User-Agent': f'GATO/{CLIENT_VER}', 'Accept': 'application/json'})
         with urllib.request.urlopen(req, timeout=timeout or TIMEOUT, context=_SSL_CTX) as r:
             return json.loads(r.read().decode('utf-8'))
 CMD_TIMEOUT = 40
+def _ver_key(v):
+    out = []
+    for p in str(v or '').lstrip('vV').replace('-', '.').split('.'):
+        out.append(int(p) if p.isdigit() else 0)
+    while len(out) < 3:
+        out.append(0)
+    return tuple(out[:3])
+
+
 def _err_detail(e) -> str:
     resp = getattr(e, 'response', None)
     if resp is not None and getattr(resp, 'status_code', None):
@@ -108,6 +177,8 @@ class AuthClient:
         self.no_battle_limit = 0
         self.notice = ''
         self.latest_patch = ''
+        self.min_ver = ''
+        self.hwid = hwid()
         self._net_fails = 0
         self.state = {}
         self.net_err = ''
@@ -143,11 +214,12 @@ class AuthClient:
             return False
         else:
             try:
-                r = _post('/auth', {'id': self.auth_id, 'mob': self.mob, 'ver': CLIENT_VER, 'code_ver': CODE_VER})
+                r = _post('/auth', {'id': self.auth_id, 'hwid': self.hwid, 'mob': self.mob, 'ver': APP_VER, 'code_ver': CODE_VER})
             except Exception as e:
                 self.reason = 'network'
                 self.net_err = _err_detail(e)
                 return False
+            self._absorb(r)
             if not r.get('ok'):
                 self.reason = r.get('reason', 'denied')
                 return False
@@ -163,10 +235,6 @@ class AuthClient:
                         self.token = r.get('token', '')
                         self.expiry = r.get('expiry', '') or ''
                         self.days_left = r.get('days_left', self._calc_days())
-                        self.credits = r.get('credits') if r.get('metered') else None
-                        self.banja = bool(r.get('banja'))
-                        self.no_battle_limit = int(r.get('no_battle_limit') or 0)
-                        self.notice = r.get('notice', '') or self.notice
                         self.ok = True
                         self.reason = ''
                         self._net_fails = 0
@@ -178,7 +246,7 @@ class AuthClient:
             return self.ok
         else:
             try:
-                r = _post('/heartbeat', {'id': self.auth_id, 'token': self.token, 'mob': self.mob, 'ver': CLIENT_VER, 'code_ver': CODE_VER, **(self.state or {})})
+                r = _post('/heartbeat', {'id': self.auth_id, 'token': self.token, 'hwid': self.hwid, 'mob': self.mob, 'ver': APP_VER, 'code_ver': CODE_VER, **(self.state or {})})
             except Exception as e:
                 self._net_fails += 1
                 self.net_err = _err_detail(e)
@@ -189,10 +257,7 @@ class AuthClient:
                 else:
                     return self.ok
             self._net_fails = 0
-            if isinstance(r.get('notice'), str):
-                self.notice = r.get('notice')
-            if 'expiry' in r:
-                self.expiry = r.get('expiry') or ''
+            self._absorb(r)
             if not r.get('ok'):
                 self.ok = False
                 self.reason = r.get('reason', 'revoked')
@@ -200,14 +265,25 @@ class AuthClient:
                 return False
             else:
                 self.days_left = r.get('days_left', self._calc_days())
-                self.credits = r.get('credits') if r.get('metered') else None
-                self.banja = bool(r.get('banja', self.banja))
-                self.no_battle_limit = int(r.get('no_battle_limit', self.no_battle_limit) or 0)
-                self.latest_patch = str(r.get('patch', self.latest_patch) or '')
                 self.ok = True
                 return True
+    def _absorb(self, r: dict) -> None:
+        """Common fields the server returns on both /auth and /heartbeat."""
+        if isinstance(r.get('notice'), str):
+            self.notice = r.get('notice') or ''
+        mv = str(r.get('min_ver') or '')
+        if mv:
+            self.min_ver = mv
+        self.latest_patch = str(r.get('patch', self.latest_patch) or '')
     def update_available(self) -> bool:
-        return bool(CODE_VER and self.latest_patch and (self.latest_patch != CODE_VER))
+        """True when the server's floor is above this build."""
+        if not self.min_ver or not APP_VER:
+            return bool(CODE_VER and self.latest_patch and (self.latest_patch != CODE_VER))
+        return _ver_key(APP_VER) < _ver_key(self.min_ver)
+
+    def must_update(self) -> bool:
+        """Server refuses this build - the bot may not start until it updates."""
+        return self.reason == 'outdated'
     def _calc_days(self):
         if not self.expiry:
             return

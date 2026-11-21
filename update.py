@@ -130,7 +130,10 @@ def install(api):
                     log(f'{info["tag"]} 발견 (현재 {current_version()}) — 내려받는 중')
                     path = download(info, log)
                     waited = 0.0
-                    while api.brain.running and waited < 1800:
+                    # A forced update (server floor above this build) must land
+                    # quickly, so it only gives the bot a couple of minutes.
+                    limit = 150.0 if api.auth.must_update() else 1800.0
+                    while api.brain.running and waited < limit:
                         time.sleep(5.0)
                         waited += 5.0
                     api._update_ready = {'tag': info['tag'], 'path': path}

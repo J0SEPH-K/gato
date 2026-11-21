@@ -464,7 +464,7 @@
         <div class="scard">
           <div class="scard-title">서버 인증</div>
           <div class="field-row">
-            <div class="field" style="flex:1"><span class="lbl">서버 등록 ID</span><input id="authId" type="text" class="mtext" placeholder="ID 입력" onkeydown="if(event.key==='Enter')doLogin()"></div>
+            <div class="field" style="flex:1"><span class="lbl">라이선스 키</span><input id="authId" type="text" class="mtext" placeholder="GATO-XXXX-XXXX" onkeydown="if(event.key==='Enter')doLogin()"></div>
             <button id="btnLogin" class="tbtn" style="align-self:flex-end">로그인</button>
           </div>
           <button id="btnLogout" class="tbtn" style="align-self:flex-start">로그아웃</button>
@@ -674,8 +674,16 @@
 
     const up = s.update || {};
     const ub = $('btnUpdate');
-    ub.classList.toggle('show', !!up.available);
-    if (up.available) {
+    ub.classList.toggle('show', !!(up.available || up.forced));
+    if (up.forced) {
+      ub.textContent = '업데이트 필수';
+      ub.title = `최소 버전 ${up.latest} — 지금 업데이트해야 시작할 수 있습니다`;
+      if (updNotified !== 'forced:' + up.latest) {
+        updNotified = 'forced:' + up.latest;
+        toast(`업데이트가 필요합니다 (최소 ${up.latest}) — 우측 상단 버튼을 눌러주세요`, 'err');
+      }
+    } else if (up.available) {
+      ub.textContent = '업데이트';
       ub.title = `새 버전 ${up.latest} (현재 ${up.current}) — 클릭하면 자동 업데이트`;
       if (up.latest && updNotified !== up.latest) {
         updNotified = up.latest;
@@ -1102,7 +1110,7 @@
     $('btnMin').onclick = () => pywebview.api.win_minimize();
     $('btnWinClose').onclick = () => pywebview.api.win_close();
     $('btnUpdate').onclick = async () => {
-      toast('업데이트 시작 — 앱을 다시 시작합니다', 'ok');
+      toast('업데이트 시작 — 내려받은 뒤 앱을 다시 시작합니다', 'ok');
       try {
         const r = await pywebview.api.self_update();
         if (r && !r.ok) toast(r.msg || '업데이트 실패', 'err');
