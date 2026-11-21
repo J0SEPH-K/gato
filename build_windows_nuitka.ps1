@@ -8,6 +8,8 @@ Set-Location -Path $PSScriptRoot
 $py = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw 'Run install.ps1 first (creates .venv).' }
 $ProgressPreference = 'SilentlyContinue'
+$ver = (Get-Content 'VERSION' -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $ver) { $ver = '1.0.0' }
 
 & $py -m pip install --upgrade nuitka ordered-set zstandard
 if ($LASTEXITCODE -ne 0) { throw 'pip install nuitka failed' }
@@ -32,6 +34,8 @@ $nargs = @(
     '--output-filename=Gato.exe',
     '--company-name=J0SEPH-K',
     '--product-name=GATO',
+    # Nuitka refuses version info without a version; keep it in step with VERSION.
+    ('--product-version=' + $ver),
     '--include-data-dir=ui=ui',
     '--include-data-dir=assets=assets',
     '--include-data-file=settings.default.json=settings.default.json',
@@ -67,8 +71,6 @@ if (-not $iscc) {
     $iscc = 'C:\InnoSetup\ISCC.exe'
 }
 Write-Host '== Inno Setup =='
-$ver = (Get-Content 'VERSION' -ErrorAction SilentlyContinue | Select-Object -First 1)
-if (-not $ver) { $ver = '1.0.0' }
 # gato.iss packages ..\dist\Gato; a compiled build lands in distn\run_gato.dist.
 New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
 if (Test-Path 'dist\Gato') { Remove-Item 'dist\Gato' -Recurse -Force }
