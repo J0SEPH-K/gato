@@ -1,10 +1,17 @@
 name: build-installer
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      builder:
+        description: 'nuitka (compiled C, no readable source) or pyinstaller (bytecode)'
+        required: true
+        default: 'nuitka'
+        type: choice
+        options: ['nuitka', 'pyinstaller']
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,12 +24,27 @@ jobs:
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
           .\.venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
           if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
+      - name: Build (compiled, selftest gate, Inno Setup)
+        if: inputs.builder == 'nuitka'
+        shell: pwsh
+        run: |
+          .\build_windows_nuitka.ps1
+          if (-not (Test-Path 'dist-installer\GatoSetup.exe')) { throw 'GatoSetup.exe missing' }
+          Get-FileHash 'dist-installer\GatoSetup.exe' -Algorithm SHA256 | Format-List
       - name: Build (PyInstaller, selftest gate, Inno Setup)
+        if: inputs.builder == 'pyinstaller'
         shell: pwsh
         run: |
           .\build_windows.ps1
           if (-not (Test-Path 'dist-installer\GatoSetup.exe')) { throw 'GatoSetup.exe missing' }
           Get-FileHash 'dist-installer\GatoSetup.exe' -Algorithm SHA256 | Format-List
+      - name: No readable source in the shipped tree
+        if: always()
+        shell: pwsh
+        run: |
+          $py = @(Get-ChildItem 'dist\Gato' -Filter '*.py' -Recurse -ErrorAction SilentlyContinue)
+          Write-Host ("leftover .py files: " + $py.Count)
+          if ($py.Count -gt 0) { $py | Select-Object -First 10 FullName | Format-Table -AutoSize }
       - name: Show selftest
         if: always()
         shell: pwsh
