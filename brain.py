@@ -1617,8 +1617,23 @@ class Brain:
                             dump = self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})
                             self._upload_jochul_debug(frames, times, f'tracker={answer} swap_decoder={old_answer}', meta=dict(meta), first_img=frame)
                         if answer is None:
-                            answer = old_answer if old_answer is not None else 3
-                            self._log(f'{p}조철 추적 실패 → {"스왑 해독값" if old_answer is not None else "중앙"}({answer}) 클릭')
+                            # Measured on 7 real logged failures (2026-11-22): the swap-decoder
+                            # fallback used here is right 3/7 times (43%) - barely better than a
+                            # coin flip among the remaining slots, and a WRONG click is the
+                            # expensive failure mode (ban-ladder risk per docs/COMMERCIAL.md, and
+                            # it looks like bot behaviour to anti-cheat specifically because a
+                            # guess reads as "didn't actually know"). Clicking a 43%-reliable
+                            # guess to keep farming uptime up is a worse trade than pausing: a
+                            # paused bot loses one round's time, a wrong click risks the account.
+                            # So: when the tracker can't decide, don't guess - stop and let the
+                            # human solve this one round by hand, exactly like the already-existing
+                            # 'first tile not found' and 'window vanished' stop reasons.
+                            meta['clicked'] = None
+                            meta['passed'] = None
+                            if dump:
+                                self._write_meta(dump, meta)
+                            self._stop_now(f'{p}조철 불확실 — 추적도 해독도 실패, 직접 확인 필요 (스왑 해독값={old_answer})')
+                            return
                         meta['clicked'] = answer
                         x = jochul.CLICK_X[answer]
                         time.sleep(1.0)

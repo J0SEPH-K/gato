@@ -94,5 +94,15 @@ b, hands, notes, parks, solved = make(999)
 b._handle_jochul()
 check('no marker: macro stops with a clear reason', (not b.running) and any('첫 마패 인식 실패' in n for n in notes), notes[:5])
 check('no marker: frame saved for diagnosis', os.path.isdir(config.JOCHUL_FAIL_DIR) and any(f.startswith('first_tile_miss') for f in os.listdir(config.JOCHUL_FAIL_DIR)))
+
+# 4) tracker uncertain (None) -> stop and ask for a human, NEVER click a guess (2026-11-22: the
+# swap-decoder fallback this used to click measured 43% real-world accuracy on 7 logged failures -
+# a wrong click is the expensive failure mode, so uncertain must mean "stop", not "guess anyway").
+b, hands, notes, parks, solved = make(0.0, track_answer=None)
+b._handle_jochul()
+clicks = [h for h in hands.log if h[0] == 'click']
+check('uncertain tracker: macro stops instead of guessing', (not b.running) and any('불확실' in n for n in notes), notes[:6])
+check('uncertain tracker: NO click was made', len(clicks) == 0, clicks)
+
 print('FAILED: %s' % fails if fails else 'all passed')
 sys.exit(1 if fails else 0)
