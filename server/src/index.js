@@ -172,6 +172,29 @@ async function handleHeartbeat(req, env) {
   return json({ ok: true, days_left: daysLeft, min_ver: cfg.min_ver, notice: cfg.notice });
 }
 
+async function handleAppear(req, env) {
+  const body = await readJson(req);
+  if (!body) return json({ ok: false }, 400);
+
+  const id = String(body.id || '').trim().slice(0, 64);
+  const token = String(body.token || '').trim().slice(0, 128);
+  const kind = String(body.kind || '').trim().slice(0, 16);
+  const wrong = body.wrong ? 1 : 0;
+  if (!id || !token || (kind !== 'jochul' && kind !== 'jamun')) return json({ ok: false }, 400);
+
+  // Same trust boundary as /heartbeat: a live bind token proves this is a real, authed client,
+  // not a quota-abuse source. One indexed read, then one upsert (both cheap, D1 free tier).
+  const bind = await env.DB.prepare('SELECT 1 FROM binds WHERE id = ? AND token = ?').bind(id, token).first();
+  if (!bind) return json({ ok: false }, 403);
+
+  const d = day(now());
+  await env.DB.prepare(
+    `INSERT INTO day_counts (id, day, kind, appeared, wrong) VALUES (?, ?, ?, 1, ?)
+     ON CONFLICT (id, day, kind) DO UPDATE SET appeared = appeared + 1, wrong = wrong + excluded.wrong`
+  ).bind(id, d, kind, wrong).run();
+  return json({ ok: true });
+}
+
 // ---------------------------------------------------------------- admin
 
 async function admin(req, env, url) {
@@ -190,6 +213,20 @@ async function admin(req, env, url) {
     if (!lic) return json({ ok: false, reason: 'denied' }, 404);
     const b = await env.DB.prepare('SELECT hwid, seen FROM binds WHERE id = ?').bind(id).all();
     return json({ ok: true, license: lic, binds: b.results || [] });
+  }
+
+  // Real accuracy across ALL customers (every round, not just the failures someone remembered to
+  // zip up) - see day_counts in schema.sql. ?days=N limits the window (default 30).
+  if (p === '/admin/accuracy' && req.method === 'GET') {
+    const days = Math.max(1, Math.min(365, parseInt(url.searchParams.get('days') || '30', 10)));
+    const since = day(now()) - days + 1;
+    const overall = await env.DB.prepare(
+      'SELECT kind, SUM(appeared) AS appeared, SUM(wrong) AS wrong FROM day_counts WHERE day >= ? GROUP BY kind'
+    ).bind(since).all();
+    const byId = await env.DB.prepare(
+      'SELECT id, kind, SUM(appeared) AS appeared, SUM(wrong) AS wrong FROM day_counts WHERE day >= ? GROUP BY id, kind ORDER BY appeared DESC LIMIT 200'
+    ).bind(since).all();
+    return json({ ok: true, days, overall: overall.results || [], by_license: byId.results || [] });
   }
 
   const body = await readJson(req);
@@ -272,6 +309,7 @@ export default {
       }
       if (p === '/auth' && req.method === 'POST') return await handleAuth(req, env);
       if (p === '/heartbeat' && req.method === 'POST') return await handleHeartbeat(req, env);
+      if (p === '/appear' && req.method === 'POST') return await handleAppear(req, env);
       if (p === '/health') return json({ ok: true, t: now() });
       return json({ ok: false, reason: 'not_found' }, 404);
     } catch (e) {
