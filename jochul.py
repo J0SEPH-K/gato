@@ -518,6 +518,11 @@ def resample_vote(per_frame, times, fps=FPS):
 # ---------------------------------------------------------------------------------------------
 TRACK_SLOT_X = np.array([65, 145, 225, 305, 385], float)  # board-crop coords of the 5 slots
 TRACK_ROW_Y = 140.0
+MAX_SETTLE_SPEED = 100.0  # px/s; above this the tracked character is still visibly sliding, not
+                          # settled - see the extrapolated-end guard in track_centroids(). Real
+                          # settled speeds measured so far: ~0-59 px/s; a real still-moving case
+                          # measured 233 px/s. Comfortably between the two, not yet validated
+                          # against more real data.
 
 
 def _assign_optimal(cost):
@@ -622,6 +627,19 @@ def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
         fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
         fin = fin[np.argsort(fin[:, 0])]
     else:
+        # Extrapolated-end case: the assumed-settled canonical grid is only trustworthy if the
+        # tracked character has actually STOPPED moving by the last captured frame. Found
+        # 2026-11-22 from a third real failure (different PC): the recording can end while 2+
+        # characters are still visibly sliding into place (the settle animation outlasted the
+        # capture window) - bucketing a still-moving point against the fixed grid is a guess, not
+        # a measurement, and was confidently wrong (said 4; the game's reveal says 1). The tracked
+        # character's own final speed was 233 px/s there, vs 0-59 px/s on the two real rounds
+        # where this same fallback path is already known to behave safely (one of them already
+        # returns 'no majority' from disagreement; the other is the dev fixture, settled, ~0-2
+        # px/s) - well separated, so gate on it instead of guessing.
+        tracked_speed = float(np.linalg.norm(vel[start_slot - 1]))
+        if tracked_speed > MAX_SETTLE_SPEED:
+            return None, 'tracked character still moving at capture end (%.0f px/s)' % tracked_speed
         fin = np.stack([TRACK_SLOT_X, np.full(5, TRACK_ROW_Y)], axis=1)
     C = np.linalg.norm(pos[:, None, :] - fin[None, :, :], axis=2)
     r, c = _assign_optimal(C)
