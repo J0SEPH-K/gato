@@ -78,6 +78,10 @@ def poll(keep_sec=RECENT_SEC):
 
 
 def _pick(name, live):
+    # Announcements are quota-limited, so a PC that is running fine can be far past STALE_SEC.
+    # `list` already decides liveness by actually asking /status; picking must not be stricter
+    # than that or every call fails while `list` shows the PC as running.
+    live = {**_state(), **live}
     if name.lower() in live:
         return live[name.lower()]
     for k, v in live.items():
