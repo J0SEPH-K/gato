@@ -547,11 +547,38 @@ def _in_row(pts):
 def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
     """dets: per-frame list of (x, y) character centroids (from the YOLO detector, not background
     blobs). Returns (final slot 1-5 of the character that started at start_slot, info string), or
-    (None, reason) if no usable start/end row was found."""
+    (None, reason) if no usable start row was found.
+
+    BUG (found 2026-11-22 from a real customer's logged failure, not the dev fixture): this used to
+    always require a clean 5-point row near the END too, found by scanning backward for the last
+    _in_row() frame. On a real round that end anchor can simply not exist - one character was
+    undetected (occlusion/overlap) through the ENTIRE 1.4 s settle window right before reveal,
+    something the one clean dev-fixture round never exercised (its tail is instead a few frames of
+    reveal-popup visual noise AFTER a perfectly clean settled row, which the old code correctly
+    anchored on). When no late clean row exists, the backward scan used to fall through all the way
+    to whatever row it last saw - in the logged failure, frames 0-3 (the first 0.06 s, before the
+    shuffle even started) - so both anchors ended up inside that 0.06 s window and the 'track'
+    covered none of the actual 13.4 s shuffle. Every ensemble setting agreed (5/5, looked maximally
+    confident) because they were all measuring the same zero-motion no-op, not because the answer
+    was right - the game's own reveal proved it wrong.
+    Fix: keep the original fast path (anchor on a genuine LATE clean row, matching tracked
+    positions against that real frame) whenever one exists in roughly the back half of the
+    recording - this is what makes the dev fixture work and is more precise than the fallback
+    when the data allows it. Only when no such late anchor exists (the real-failure case) fall
+    back to tracking continuously, frame by frame, all the way to the actual last frame via the
+    existing velocity/Hungarian matching (already tolerant of missing/extra detections per frame),
+    then read the final slot off the fixed slot grid (TRACK_SLOT_X/TRACK_ROW_Y) instead of a
+    frame that doesn't exist.
+    """
     s = next((i for i, d in enumerate(dets) if _in_row(d)), None)
-    e = next((i for i in range(len(dets) - 1, -1, -1) if _in_row(dets[i])), None)
-    if s is None or e is None or e <= s:
-        return None, 'no start/end row found'
+    if s is None:
+        return None, 'no start row found'
+    n = len(dets)
+    e_clean = next((i for i in range(n - 1, -1, -1) if _in_row(dets[i])), None)
+    use_clean_end = e_clean is not None and e_clean > s and e_clean >= s + (n - s) * 0.5
+    e = e_clean if use_clean_end else n - 1
+    if e <= s:
+        return None, 'start row too close to end of recording'
     pos = np.array(sorted(dets[s], key=lambda p: p[0])[:5] if len(dets[s]) == 5
                    else sorted(dets[s], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
     pos = pos[np.argsort(pos[:, 0])]
@@ -582,12 +609,17 @@ def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
             pos = pred
             vel *= decay
             coast += 5
-    fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
-    fin = fin[np.argsort(fin[:, 0])]
+    if use_clean_end:
+        fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
+        fin = fin[np.argsort(fin[:, 0])]
+    else:
+        fin = np.stack([TRACK_SLOT_X, np.full(5, TRACK_ROW_Y)], axis=1)
     C = np.linalg.norm(pos[:, None, :] - fin[None, :, :], axis=2)
     r, c = _assign_optimal(C)
     m = {int(a): int(b) + 1 for a, b in zip(r, c)}
-    return m.get(start_slot - 1), 'ok (coasted %d track-frames)' % coast
+    span = e - s
+    mode = 'clean-end' if use_clean_end else 'extrapolated-end'
+    return m.get(start_slot - 1), 'ok (%s, coasted %d/%d track-frames)' % (mode, coast, span)
 
 
 class RoundRecorder:
