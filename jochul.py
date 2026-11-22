@@ -569,11 +569,20 @@ def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
     existing velocity/Hungarian matching (already tolerant of missing/extra detections per frame),
     then read the final slot off the fixed slot grid (TRACK_SLOT_X/TRACK_ROW_Y) instead of a
     frame that doesn't exist.
+
+    (Tried 2026-11-22: also assuming a canonical-grid start when no clean start row exists at
+    all, by the same reasoning as the end-anchor fix. Reverted - tested against a real logged
+    failure with no start row (20261121_011754), it turned an honest 'no usable row' into a
+    confident WRONG answer (said slot 2; the game's reveal says slot 1). 'uncertain' is the
+    correct, safe output when the data genuinely doesn't support a claim - this function must
+    not trade an honest None for a false-confidence wrong guess, which is the exact bug fixed
+    above. Only the END anchor has evidence (two real rounds) justifying the grid-assumption
+    fallback; the START anchor still requires a real clean row.)
     """
+    n = len(dets)
     s = next((i for i, d in enumerate(dets) if _in_row(d)), None)
     if s is None:
         return None, 'no start row found'
-    n = len(dets)
     e_clean = next((i for i in range(n - 1, -1, -1) if _in_row(dets[i])), None)
     use_clean_end = e_clean is not None and e_clean > s and e_clean >= s + (n - s) * 0.5
     e = e_clean if use_clean_end else n - 1
