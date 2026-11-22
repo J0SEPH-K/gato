@@ -29,9 +29,13 @@ $pkgs = @('websockets', 'cryptography', 'windows_capture', 'pythonnet', 'clr_loa
 # pruned because MSVC-compiling all of torch/scapy/ultralytics takes hours. torch's own Nuitka plugin
 # still supplies its DLLs and package data. The selftest gate after the build proves nothing broke.
 $nofollow = @(
-    # torch.distributed is imported unconditionally by torch/__init__.py, so it cannot be pruned.
+    # torch.distributed and torch.utils.data.datapipes are both imported unconditionally by their
+    # parent packages (torch/__init__.py, torch/utils/data/__init__.py respectively), so neither
+    # can be pruned - confirmed locally (python -c "import torch.utils.data" pulls in datapipes.*
+    # every time). Pruning datapipes broke run 44963584621 (ModuleNotFoundError at exe startup,
+    # cascading to ultralytics/brain/prism/yolo all failing the selftest).
     'torch.testing', 'torch.utils.tensorboard', 'torch.utils.benchmark',
-    'torch.utils.data.datapipes', 'torch._dynamo', 'torch._inductor', 'torch._export', 'torch.ao',
+    'torch._dynamo', 'torch._inductor', 'torch._export', 'torch.ao',
     'torch.onnx', 'torch.jit', 'torch.fx', 'torch.multiprocessing',
     'torchvision.datasets', 'torchvision.io', 'torchvision.models.video',
     'scapy.contrib', 'scapy.layers.tls',
