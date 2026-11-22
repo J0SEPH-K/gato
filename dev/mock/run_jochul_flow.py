@@ -54,6 +54,13 @@ def check(name, cond, extra=''):
 
 import tempfile, json
 config.BASE_DIR = tempfile.mkdtemp(prefix='gato_rounds_')
+# JOCHUL_FAIL_DIR is a module-level constant computed from the ORIGINAL BASE_DIR at config.py
+# import time, so reassigning config.BASE_DIR above does NOT move it - every mock round whose
+# answer disagrees with the (always-naive) swap decoder was silently dumping fake frames into the
+# real repo's debug/jochul_fail/ (discovered 2026-11-22: 5 "live failure" dirs there all had
+# track_info == 'ok (mock tracker)', i.e. they were this script, not the real game). Redirect for
+# every test case, not just case 3, so this can never contaminate real evidence again.
+config.JOCHUL_FAIL_DIR = os.path.join(tempfile.mkdtemp(prefix='gato_jochul_fail_'), 'jochul_fail')
 # 1) tile visible at once
 b, hands, notes, parks, solved = make(0.0)
 t = time.time(); b._handle_jochul(); el = time.time() - t
@@ -83,7 +90,6 @@ b._handle_jochul()
 check('medallion only (other skin): first slot 3 found', any('첫 마패: 3번' in n for n in notes) and b.running, notes[:6])
 
 # 3) marker never appears -> stops, saves frame
-config.JOCHUL_FAIL_DIR = os.path.join(os.environ.get('TMPDIR', '/tmp'), 'jochul_fail_test')
 b, hands, notes, parks, solved = make(999)
 b._handle_jochul()
 check('no marker: macro stops with a clear reason', (not b.running) and any('첫 마패 인식 실패' in n for n in notes), notes[:5])
