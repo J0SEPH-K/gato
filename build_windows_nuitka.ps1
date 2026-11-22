@@ -29,17 +29,20 @@ $pkgs = @('websockets', 'cryptography', 'windows_capture', 'pythonnet', 'clr_loa
 # pruned because MSVC-compiling all of torch/scapy/ultralytics takes hours. torch's own Nuitka plugin
 # still supplies its DLLs and package data. The selftest gate after the build proves nothing broke.
 $nofollow = @(
-    # torch.distributed and torch.utils.data.datapipes are both imported unconditionally by their
-    # parent packages (torch/__init__.py, torch/utils/data/__init__.py respectively), so neither
-    # can be pruned - confirmed locally (python -c "import torch.utils.data" pulls in datapipes.*
-    # every time). Pruning datapipes broke run 44963584621 (ModuleNotFoundError at exe startup,
-    # cascading to ultralytics/brain/prism/yolo all failing the selftest).
-    'torch.testing', 'torch.utils.tensorboard', 'torch.utils.benchmark',
-    'torch._dynamo', 'torch._inductor', 'torch._export', 'torch.ao',
-    'torch.onnx', 'torch.jit', 'torch.fx', 'torch.multiprocessing',
-    'torchvision.datasets', 'torchvision.io', 'torchvision.models.video',
-    'scapy.contrib', 'scapy.layers.tls',
-    'ultralytics.trackers', 'ultralytics.models.rtdetr',
+    # 2026-11-22: audited EVERY entry in this list by actually importing torch/torchvision/
+    # ultralytics/scapy in a real interpreter and checking sys.modules - found 14 of the 17
+    # ML-related entries previously here are unconditionally imported by their own parent
+    # package (torch._dynamo, torch._inductor, torch._export, torch.ao, torch.onnx, torch.jit,
+    # torch.fx, torch.multiprocessing, torch.testing, torchvision.datasets/io/models.video,
+    # scapy.contrib, scapy.layers.tls, ultralytics.models.rtdetr - ALL present in sys.modules
+    # after a plain `import torch/torchvision/ultralytics/scapy.all`). Nofollowing any of them
+    # is not a compile-time optimization, it's a guaranteed ModuleNotFoundError at exe startup -
+    # confirmed the hard way across three separate multi-hour CI failures today (torch.distributed
+    # in 44941920737, torch.utils.data.datapipes in 44963584621, torch.testing in 45001629835,
+    # each one only found after a full ~4h Nuitka compile). Only the three entries below were
+    # verified NOT present in sys.modules after the same import, so only these are actually safe
+    # to skip. Do not add anything back to this list without re-running that same check first.
+    'torch.utils.tensorboard', 'torch.utils.benchmark', 'ultralytics.trackers',
     'tkinter', 'matplotlib', 'pytest', 'IPython', 'notebook', 'setuptools', 'pip'
 )
 
