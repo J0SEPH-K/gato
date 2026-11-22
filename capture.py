@@ -94,7 +94,7 @@ def find_windows(process_name: str=PROCESS_NAME) -> list:
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 if target_pid is not None and pid != target_pid:
                     return
-                if _get_process_exe(pid).endswith('\\' + process_name):
+                if _get_process_exe(pid).lower().endswith('\\' + process_name.lower()):
                     result.append(hwnd)
     win32gui.EnumWindows(_enum, None)
     result.sort(key=lambda h: 0 if win32gui.GetWindowText(h) == 'Gersang' else 1)

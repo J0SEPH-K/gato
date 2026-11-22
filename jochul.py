@@ -6,6 +6,7 @@
 import threading
 import time
 from collections import Counter
+import cv2
 import numpy as np
 REGION = (287, 231, 734, 582)
 PARK_XY = (292, 167)
@@ -314,6 +315,10 @@ class JochulSolver:
         return out
 
     ENSEMBLE_SETTINGS = [(100.0, 0.6), (100.0, 0.95), (150.0, 0.8), (220.0, 0.6), (220.0, 0.95)]
+    # A simple majority (3/5) is too weak for a costly wrong click: it lets two settings
+    # disagree and still auto-click. The only labelled clean real round we have currently
+    # produces 4/5 votes for the confirmed answer, so require at least 4/5 and abstain otherwise.
+    MIN_ENSEMBLE_VOTES = 4
 
     def solve_tracked(self, frames, times, first_slot, conf=0.20, settings=None):
         """Primary live answer (see the note above TRACK_SLOT_X): velocity-predicted Hungarian
@@ -336,8 +341,8 @@ class JochulSolver:
             return None, f'no setting found a usable start/end row (votes={votes})'
         top, n_top = counts.most_common(1)[0]
         info = f'ensemble {dict(counts)} of {len(votes)}'
-        if n_top * 2 <= len(votes):   # no majority (ties, or scattered votes) - do not guess
-            return None, f'no majority - {info}'
+        if n_top < self.MIN_ENSEMBLE_VOTES or n_top * 2 <= len(votes):
+            return None, f'insufficient agreement (<{self.MIN_ENSEMBLE_VOTES}/5) - {info}'
         return top, info
     def _detect_missing(self, frames):
         import torch
@@ -378,10 +383,11 @@ PAIRS = [(a, b) for a in range(1, 6) for b in range(a + 1, 6)]
 _PAIR_INDEX = {p: i for i, p in enumerate(PAIRS)}
 
 
-def record_all(hwnd, duration=DURATION_S, stop=None, max_fps=MAX_REC_FPS):
+def record_all(hwnd, duration=DURATION_S, stop=None, max_fps=MAX_REC_FPS, on_frame=None):
     """Keep EVERY distinct game frame for `duration` seconds (not a fixed 15 Hz sample).
     Returns (crops, times); times are seconds since the first poll. Needs the WGC capture session
-    (it counts frames); falls back to ~30 Hz polling of the normal grab if WGC is unavailable."""
+    (it counts frames); falls back to ~30 Hz polling of the normal grab if WGC is unavailable.
+    `on_frame`, when provided, receives each appended crop as (index, frame, elapsed_seconds)."""
     import cv2
     import capture
     import wgc
@@ -421,6 +427,8 @@ def record_all(hwnd, duration=DURATION_S, stop=None, max_fps=MAX_REC_FPS):
         frames.append(np.ascontiguousarray(crop_region(f)))
         last_t = now - t0
         times.append(last_t)
+        if on_frame is not None:
+            on_frame(len(frames) - 1, frames[-1], last_t)
     return frames, times
 
 
@@ -745,3 +753,41 @@ class RoundRecorder:
             return d
         except Exception:
             return None
+
+
+SETTLE_SLOTS = [65, 145, 225, 305, 385]
+SETTLE_Y = 160
+SETTLE_MARGIN = 20
+SETTLE_GOLD_MIN = 40
+SETTLE_NEED = 4
+READ_CAP_S = 19.5
+ROW_BAND = (slice(100, 225), slice(40, 410))
+
+
+def settle_vote(votes, reading):
+    """Accumulate consecutive valid settled readings; None breaks the voting streak."""
+    if reading is None:
+        votes.clear()
+        return False
+    votes.append(reading)
+    tail = votes[-SETTLE_NEED:]
+    return len(tail) == SETTLE_NEED and len(set(tail)) == 1
+
+
+def read_settled(f):
+    hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+    H, S, V = (hsv[..., i].astype(int) for i in range(3))
+    sats, golds = [], []
+    for x in SETTLE_SLOTS:
+        b = (slice(SETTLE_Y - 45, SETTLE_Y + 45), slice(x - 22, x + 22))
+        u = (slice(SETTLE_Y - 80, SETTLE_Y - 40), slice(x - 32, x + 32))
+        sats.append(float(np.median(S[b])))
+        golds.append(int(((H[u] >= 15) & (H[u] <= 38) & (S[u] >= 130) & (V[u] >= 150)).sum()))
+    o = sorted(range(5), key=lambda k: -(sats[k] + golds[k] / 300.0))
+    if (sats[o[0]] - sats[o[1]]) < SETTLE_MARGIN or golds[o[0]] < SETTLE_GOLD_MIN:
+        return None
+    return o[0] + 1
+
+
+def row_band(f):
+    return cv2.cvtColor(f[ROW_BAND], cv2.COLOR_BGR2GRAY)

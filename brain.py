@@ -1583,107 +1583,162 @@ class Brain:
                     return
                 else:
                     self._log(f'{p}조철 첫 마패: {first}번')
-                    time.sleep(max(0.0, jochul.SHUFFLE_DELAY - (time.time() - _t_ref)))
                     rec_hwnd = hwnd or self.engine.hwnd or find_window()
-                    rec_cap = (lambda: grab_hwnd(rec_hwnd)) if rec_hwnd else self._cap
-                    # all-native-frame capture + velocity/Hungarian tracking of the detector's own
-                    # centroids is the PRIMARY answer (2026-11-20): on the one real, user-confirmed
-                    # round available, the old swap-model decoder (periodic_decode) got it WRONG in
-                    # every tuning tried, while this tracker got it right in 9/9 parameter settings.
-                    # periodic_decode is still run and recorded for comparison, never for the click.
-                    frames, times = jochul.record_all(rec_hwnd, duration=jochul.DURATION_S,
-                                                       stop=lambda: not self.running) if rec_hwnd else ([], [])
+                    st = {'prev': None, 'still': 0, 'votes': [], 'locked': None, 'focused': False, 'focus_th': None}
+
+                    def _on_frame(i, frame, t):
+                        band = jochul.row_band(frame)
+                        if st['prev'] is not None:
+                            d = float(np.mean(cv2.absdiff(band, st['prev'])))
+                            st['still'] = st['still'] + 1 if d < 3.0 else 0
+                        st['prev'] = band
+                        if st['still'] < 5:
+                            return
+                        if not st['focused']:
+                            st['focused'] = True
+                            # Input._foreground() takes no hwnd argument; it focuses the configured
+                            # game window. Call it off the capture callback so this stays lightweight.
+                            focus = getattr(hands, '_foreground', None)
+                            if focus is not None:
+                                st['focus_th'] = threading.Thread(target=focus, daemon=True)
+                                st['focus_th'].start()
+                        a = jochul.read_settled(frame)
+                        if jochul.settle_vote(st['votes'], a):
+                            st['locked'] = a
+
+                    time.sleep(max(0.0, jochul.SHUFFLE_DELAY - (time.time() - _t_ref)))
+                    frames, times = jochul.record_all(
+                        rec_hwnd, duration=jochul.READ_CAP_S, on_frame=_on_frame,
+                        stop=lambda: not self.running or st['locked'] is not None
+                    ) if rec_hwnd else ([], [])
                     if not self.running:
                         return
-                    else:
+                    answer = st['locked']
+                    track_info = ''
+                    if answer is None:
                         _t0 = time.perf_counter()
                         answer, track_info = self.jochul_solver.solve_tracked(frames, times, first)
                         solve_s = time.perf_counter() - _t0
-                        self._log(f'{p}조철 추적 {len(frames)}프레임 → 정답: {answer} (해석 {solve_s:.1f}s, {track_info})')
-                        import net
-                        per_std, per_sens = self.jochul_solver._detect_missing(frames)
-                        ops = jochul.periodic_decode(jochul._resample_uniform(per_std, times),
-                                                      per_frame_sens=jochul._resample_uniform(per_sens, times))
-                        n_ops = len(ops)
-                        old_order = jochul.apply_swaps(ops)
-                        old_answer = old_order.index(first) + 1 if first in old_order else None
-                        meta = {'ver': net.CODE_VER, 'first': first, 'n_ops': n_ops, 'ops': [list(o) for o in ops],
-                                'order': old_order, 'swap_decoder_answer': old_answer, 'answer': answer,
-                                'track_info': track_info, 'attempts': [], 'passed': None, 'solve_s': round(solve_s, 2)}
-                        self._jochul_meta = meta
-                        meta['marker_votes'] = {str(k): _marker_seen.count(k) for k in set(_marker_seen) if k}
-                        dump = None
-                        if answer is None or answer != old_answer:
-                            dump = self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})
-                            self._upload_jochul_debug(frames, times, f'tracker={answer} swap_decoder={old_answer}', meta=dict(meta), first_img=frame)
-                        if answer is None:
-                            # Measured on 7 real logged failures (2026-11-22): the swap-decoder
-                            # fallback used here is right 3/7 times (43%) - barely better than a
-                            # coin flip among the remaining slots, and a WRONG click is the
-                            # expensive failure mode (ban-ladder risk per docs/COMMERCIAL.md, and
-                            # it looks like bot behaviour to anti-cheat specifically because a
-                            # guess reads as "didn't actually know"). Clicking a 43%-reliable
-                            # guess to keep farming uptime up is a worse trade than pausing: a
-                            # paused bot loses one round's time, a wrong click risks the account.
-                            # So: when the tracker can't decide, don't guess - stop and let the
-                            # human solve this one round by hand, exactly like the already-existing
-                            # 'first tile not found' and 'window vanished' stop reasons.
-                            meta['clicked'] = None
-                            meta['passed'] = None
-                            if dump:
-                                self._write_meta(dump, meta)
-                            self._stop_now(f'{p}조철 불확실 — 추적도 해독도 실패, 직접 확인 필요 (스왑 해독값={old_answer})')
-                            return
-                        meta['clicked'] = answer
-                        x = jochul.CLICK_X[answer]
-                        time.sleep(1.0)
-                        def _popup_present():
-                            f = cap()
-                            return f is not None and vis._px_sum(f, 513, 43, 514, 44) == 151 and (vis._px_sum(f, 514, 43, 515, 44) == 133)
-                        def _fg_info():
-                            fg = win32gui.GetForegroundWindow()
-                            try:
-                                title = win32gui.GetWindowText(fg)[:40]
-                            except Exception:
-                                title = '?'
-                            return {'is_target': fg == rec_hwnd, 'title': title}
-                        hands.move(x, jochul.CLICK_Y, wait=True)
-                        time.sleep(0.3)
-                        meta['fg_before'] = _fg_info()
-                        hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
-                        time.sleep(0.3)
-                        hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
-                        meta['fg_after'] = _fg_info()
-                        self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x})')
-                        time.sleep(0.9)
+                        self._log(f'{p}조철 추적 폴백 {len(frames)}프레임 → 정답: {answer} (해석 {solve_s:.1f}s, {track_info})')
+                    else:
+                        self._log(f'{p}조철 정착 판독 → {answer} (표 {st["votes"]})')
+
+                    # The legacy decoder is diagnostic only. Start it only after the click/stop
+                    # decision is known, so its second YOLO pass cannot delay the settle reader.
+                    decoder_diag = {}
+                    meta_ref: dict = {'meta': None}
+
+                    def _copy_decoder_diag_to_meta():
+                        m = meta_ref['meta']
+                        if m is not None:
+                            m.update({
+                                'n_ops': decoder_diag.get('n_ops'),
+                                'ops': decoder_diag.get('ops', []),
+                                'order': decoder_diag.get('order'),
+                                'swap_decoder_answer': decoder_diag.get('answer'),
+                                'swap_decoder_error': decoder_diag.get('error'),
+                            })
+
+                    def _decode_swaps():
                         try:
-                            # after the click the clicked character turns green and the 마패 shows over it for ~1.7 s,
-                            # then the board closes (real round, 44 fps). Read it NOW, not 3 s later. Recorded as evidence
-                            # only: the game closes the board for right and wrong clicks alike, so this is NOT a pass signal.
-                            _rf = cap()
-                            if _rf is not None:
-                                meta['reveal_slot'] = jochul.find_marker_slot(jochul.crop_region(_rf))
-                                meta['start_slot'] = first
+                            per_std, per_sens = self.jochul_solver._detect_missing(frames)
+                            ops = jochul.periodic_decode(
+                                jochul._resample_uniform(per_std, times),
+                                per_frame_sens=jochul._resample_uniform(per_sens, times)
+                            )
+                            order = jochul.apply_swaps(ops)
+                            decoder_diag.update({
+                                'n_ops': len(ops),
+                                'ops': [list(o) for o in ops],
+                                'order': order,
+                                'answer': order.index(first) + 1 if first in order else None,
+                            })
+                            _copy_decoder_diag_to_meta()
+                            self._log(f'{p}조철 스왑 진단 → {decoder_diag["answer"]}')
+                        except Exception as e:
+                            decoder_diag['error'] = str(e)
+                            _copy_decoder_diag_to_meta()
+
+                    decoder_thread = threading.Thread(target=_decode_swaps, daemon=True, name='jochul-swap-diagnostic')
+                    decoder_thread.start()
+                    if answer is None:
+                        decoder_thread.join(timeout=3.0)
+                    import net
+                    old_answer = decoder_diag.get('answer')
+                    meta = {'ver': net.CODE_VER, 'first': first,
+                            'n_ops': decoder_diag.get('n_ops'), 'ops': decoder_diag.get('ops', []),
+                            'order': decoder_diag.get('order'), 'swap_decoder_answer': old_answer, 'answer': answer,
+                            'track_info': track_info, 'settle_votes': st['votes'],
+                            'swap_decoder_error': decoder_diag.get('error'),
+                            'attempts': [], 'passed': None,
+                            'solve_s': round(solve_s, 2) if answer is not None and not st['locked'] else 0.0}
+                    self._jochul_meta = meta
+                    meta_ref['meta'] = meta
+                    _copy_decoder_diag_to_meta()
+                    meta['marker_votes'] = {str(k): _marker_seen.count(k) for k in set(_marker_seen) if k}
+                    dump = None
+                    if answer is None or (old_answer is not None and answer != old_answer):
+                        dump = self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})
+                        self._upload_jochul_debug(frames, times, f'reader/tracker={answer} swap_decoder={old_answer}', meta=dict(meta), first_img=frame)
+                    if answer is None:
+                        meta['clicked'] = None
+                        meta['passed'] = None
+                        if dump:
+                            self._write_meta(dump, meta)
+                        self._stop_now(f'{p}조철 불확실 — 정착 판독과 추적 모두 실패 (스왑 해독값={old_answer})')
+                        return
+                    meta['clicked'] = answer
+                    x = jochul.CLICK_X[answer]
+                    time.sleep(0.25)
+                    def _popup_present():
+                        f = cap()
+                        return f is not None and vis._px_sum(f, 513, 43, 514, 44) == 151 and (vis._px_sum(f, 514, 43, 515, 44) == 133)
+                    def _fg_info():
+                        fg = win32gui.GetForegroundWindow()
+                        try:
+                            title = win32gui.GetWindowText(fg)[:40]
                         except Exception:
-                            pass
-                        time.sleep(2.1)
-                        present = _popup_present()
-                        meta['attempts'].append(bool(present))
-                        passed = not present
-                        meta['passed'] = passed
-                        if passed:
-                            self._log(f'{p}조철 클릭 후 창 닫힘 (정답 여부는 게임이 알려주지 않음 — 확인 불가)')
-                            if dump:
-                                self._write_meta(dump, meta)
+                            title = '?'
+                        return {'is_target': fg == rec_hwnd, 'title': title}
+                    if st.get('focus_th'):
+                        st['focus_th'].join(timeout=1.0)
+                    hands.move(x, jochul.CLICK_Y, wait=True)
+                    time.sleep(0.3)
+                    meta['fg_before'] = _fg_info()
+                    hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                    time.sleep(0.3)
+                    hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                    meta['fg_after'] = _fg_info()
+                    self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x})')
+                    time.sleep(0.9)
+                    try:
+                        # after the click the clicked character turns green and the 마패 shows over it for ~1.7 s,
+                        # then the board closes (real round, 44 fps). Read it NOW, not 3 s later. Recorded as evidence
+                        # only: the game closes the board for right and wrong clicks alike, so this is NOT a pass signal.
+                        _rf = cap()
+                        if _rf is not None:
+                            meta['reveal_slot'] = jochul.find_marker_slot(jochul.crop_region(_rf))
+                            meta['start_slot'] = first
+                    except Exception:
+                        pass
+                    time.sleep(2.1)
+                    present = _popup_present()
+                    meta['attempts'].append(bool(present))
+                    passed = not present
+                    meta['passed'] = passed
+                    if passed:
+                        self._log(f'{p}조철 클릭 후 창 닫힘 (정답 여부는 게임이 알려주지 않음 — 확인 불가)')
+                        if dump:
+                            self._write_meta(dump, meta)
+                    else:
+                        if dump:
+                            self._write_meta(dump, meta)
                         else:
-                            if dump:
-                                self._write_meta(dump, meta)
-                            else:
-                                self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})
-                            self._upload_jochul_debug(frames, times, f'{p}오답 (answer={answer})', meta=dict(meta), first_img=frame)
-                            if not hwnd:
-                                self._report_appear('jochul', wrong=True)
-                            self._stop_now(f'{p}조철 오답')
+                            self._save_frames(config.JOCHUL_FAIL_DIR, frames, times, meta=meta, extra={'first_tile': frame})
+                        self._upload_jochul_debug(frames, times, f'{p}오답 (answer={answer})', meta=dict(meta), first_img=frame)
+                        if not hwnd:
+                            self._report_appear('jochul', wrong=True)
+                        self._stop_now(f'{p}조철 오답')
     def _start_jamun(self):
         self._battle_running = True
         self._jamun_at = time.time()
