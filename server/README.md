@@ -59,3 +59,10 @@ cd server && npx wrangler deploy
 
 Secrets (`ADMIN_KEY`, `TOKEN_SECRET`) live in `.secrets.txt` locally and in the
 Worker; they are not in git.
+
+## Relay (no tunnel)
+The app POSTs `/agent/poll` every 30 s (status + last log lines) and uploads files the owner asked for via
+`/agent/up` in <=900 KB chunks. Owner side: `python3 tools/relay_cli.py agents|log|shot|ls|pull|jobs|get|stop`.
+Wrong/closed 조철 rounds are auto-uploaded to `/debug/jochul` and show up as `autodebug` jobs (kept 7 days).
+Secrets: `RELAY_KEY` (Worker secret, same value as `relay.DEFAULT_RELAY_KEY`). Tests: `wrangler dev --local --port 8788`
+then `python3 server/relay_devtest.py` and `python3 dev/test_relay.py`.

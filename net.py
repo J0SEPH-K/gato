@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 import ssl
 import urllib.error
 import urllib.parse
@@ -182,10 +183,13 @@ class AuthClient:
         self._net_fails = 0
         self.state = {}
         self.net_err = ''
+        self.grace = False
     def label(self) -> str:
         if LOCAL:
             return '로컬 모드'
         if self.ok:
+            if self.grace:
+                return '인증 · 서버 연결 대기(임시 유지)'
             if self.credits is not None:
                 return f'인증 · 잔여 {self.credits}회'
             else:
@@ -213,11 +217,19 @@ class AuthClient:
             self.reason = ''
             return False
         else:
-            try:
-                r = _post('/auth', {'id': self.auth_id, 'hwid': self.hwid, 'mob': self.mob, 'ver': APP_VER, 'code_ver': CODE_VER})
-            except Exception as e:
+            r = None
+            for attempt in range(3):   # one flaky request must not show '로그인 필요'
+                try:
+                    r = _post('/auth', {'id': self.auth_id, 'hwid': self.hwid, 'mob': self.mob, 'ver': APP_VER, 'code_ver': CODE_VER})
+                    break
+                except Exception as e:
+                    self.net_err = _err_detail(e)
+                    if attempt < 2:
+                        time.sleep(1.5 * (attempt + 1))
+            if r is None:
                 self.reason = 'network'
-                self.net_err = _err_detail(e)
+                if self._grace_ok():
+                    return True
                 return False
             self._absorb(r)
             if not r.get('ok'):
@@ -238,7 +250,38 @@ class AuthClient:
                         self.ok = True
                         self.reason = ''
                         self._net_fails = 0
+                        self.grace = False
+                        self._remember_ok()
                         return True
+    GRACE_SEC = 12 * 3600
+    def _grace_path(self) -> str:
+        import config as _config
+        return os.path.join(_config.BASE_DIR, 'auth_grace.json')
+    def _remember_ok(self) -> None:
+        """Remember that THIS key logged in on THIS PC just now (no secret beyond what the user typed)."""
+        try:
+            with open(self._grace_path(), 'w', encoding='utf-8') as f:
+                json.dump({'id': self.auth_id, 'hwid': self.hwid, 'token': self.token, 'ts': time.time(),
+                           'expiry': self.expiry, 'credits': self.credits}, f)
+        except Exception:
+            pass
+    def _grace_ok(self) -> bool:
+        """Server unreachable: keep an already-verified PC running for 12 h instead of blocking start."""
+        try:
+            with open(self._grace_path(), encoding='utf-8') as f:
+                g = json.load(f)
+            if g.get('id') != self.auth_id or g.get('hwid') != self.hwid or not g.get('token'):
+                return False
+            if time.time() - float(g.get('ts', 0)) > self.GRACE_SEC:
+                return False
+            self.token = g['token']
+            self.expiry = g.get('expiry', '') or ''
+            self.ok = True
+            self.reason = ''
+            self.grace = True
+            return True
+        except Exception:
+            return False
     def heartbeat(self) -> bool:
         if LOCAL:
             return self.ok
@@ -321,12 +364,15 @@ class AuthClient:
             return None
         else:
             def _run():
-                try:
-                    url = f'{SERVER}/debug/jochul?id={urllib.parse.quote(self.auth_id)}&token={self.token}&reason={urllib.parse.quote(str(reason)[:80])}'
-                    req = urllib.request.Request(url, data=zip_bytes, headers={'Content-Type': 'application/zip'}, method='POST')
-                    urllib.request.urlopen(req, timeout=120, context=_SSL_CTX)
-                except Exception:
-                    return None
+                url = f'{SERVER}/debug/jochul?id={urllib.parse.quote(self.auth_id)}&token={self.token}&reason={urllib.parse.quote(str(reason)[:80])}'
+                for attempt in range(4):   # a single dropped request used to lose the whole round
+                    try:
+                        req = urllib.request.Request(url, data=zip_bytes, headers={'Content-Type': 'application/zip'}, method='POST')
+                        urllib.request.urlopen(req, timeout=180, context=_SSL_CTX)
+                        return None
+                    except Exception:
+                        time.sleep(5 * (attempt + 1))
+                return None
             threading.Thread(target=_run, daemon=True).start()
     def report_error(self, kind: str, text: str, wait: bool=False) -> None:
         if not self.token:

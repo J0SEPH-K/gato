@@ -43,3 +43,39 @@ CREATE TABLE IF NOT EXISTS day_counts (
   wrong    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (id, day, kind)
 );
+
+
+-- ---- Relay: lets the owner see every client PC and pull debug files WITHOUT any tunnel.
+-- The PC only makes OUTBOUND https calls to this Worker (poll every 30 s), so NAT, a shared home IP,
+-- Cloudflare quick-tunnel 429s and the ngrok 3-agent cap cannot cut it off.
+CREATE TABLE IF NOT EXISTS agents (
+  machine TEXT PRIMARY KEY,           -- MachineGuid of the PC
+  pc      TEXT NOT NULL DEFAULT '',
+  ver     TEXT NOT NULL DEFAULT '',
+  lic     TEXT NOT NULL DEFAULT '',
+  seen    INTEGER NOT NULL DEFAULT 0,
+  status  TEXT NOT NULL DEFAULT ''    -- JSON: running, battles, scene, monster, last log lines...
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id      TEXT PRIMARY KEY,
+  machine TEXT NOT NULL,              -- target PC, or 'lic:<key>' for automatic failure uploads
+  cmd     TEXT NOT NULL,              -- log | shot | ls | pull | stop | autodebug
+  arg     TEXT NOT NULL DEFAULT '',
+  state   TEXT NOT NULL DEFAULT 'queued', -- queued | sent | done | error
+  created INTEGER NOT NULL DEFAULT 0,
+  done    INTEGER NOT NULL DEFAULT 0,
+  result  TEXT NOT NULL DEFAULT '',
+  chunks  INTEGER NOT NULL DEFAULT 0,
+  total   INTEGER NOT NULL DEFAULT 0,
+  bytes   INTEGER NOT NULL DEFAULT 0,
+  name    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_machine ON jobs (machine, state);
+
+CREATE TABLE IF NOT EXISTS blobs (
+  job  TEXT NOT NULL,
+  seq  INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  PRIMARY KEY (job, seq)
+);

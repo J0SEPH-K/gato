@@ -91,6 +91,12 @@ class Api:
             self.link = None
             self.vision.note('input', f'[링크] 설치 실패 — {type(_e).__name__}: {_e}')
         try:
+            import relay
+            self.relay = relay.install(self)   # outbound-only status + debug-file channel via the licence Worker
+        except Exception as _e:
+            self.relay = None
+            self.vision.note('input', f'[릴레이] 설치 실패 — {type(_e).__name__}: {_e}')
+        try:
             import update
             self.updater = update.install(self)   # frozen builds only; None in a source checkout
         except Exception as _e:
@@ -388,10 +394,11 @@ class Api:
                 self.vision.note('input', f'[패널] 채팅 오류: {type(e).__name__}: {e}')
         threading.Thread(target=_worker, daemon=True).start()
     def start(self):
-        if net.LOCAL and not self.auth.ok:
-            self.auth.login(self.auth_id)
+        if not self.auth.ok and (net.LOCAL or self.auth_id):
+            self.auth.login(self.auth_id)   # saved key: log in right now (3 tries + 12 h grace), never ask again
         if not self.auth.ok:
-            self.vision.note('input', f'시작 차단 — {self.auth.label()} (로그인 필요)')
+            why = '인증키를 먼저 입력하세요' if not self.auth_id else self.auth.label()
+            self.vision.note('input', f'시작 차단 — {why} (로그인 필요)')
             return self.status()
         else:
             if self.auth.must_update():
@@ -1067,6 +1074,8 @@ def main():
             api.remote.close()
         if getattr(api, 'link', None):
             api.link.close()
+        if getattr(api, 'relay', None):
+            api.relay.close()
     cfg0 = config.load()
     win_w, win_h = Api._clamp_size(cfg0.get('win_w', WIN_DEF_W), cfg0.get('win_h', WIN_DEF_H)) or (WIN_DEF_W, WIN_DEF_H)
     try:

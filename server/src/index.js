@@ -293,6 +293,195 @@ async function admin(req, env, url) {
   return json({ ok: false, reason: 'not_found' }, 404);
 }
 
+
+// ---------------------------------------------------------------- relay (no tunnel needed)
+// The client PC only makes OUTBOUND calls: POST /agent/poll every ~30 s (reports status, receives jobs) and
+// POST /agent/up (uploads the file a job asked for, in <=700 KB chunks). Jobs are created by the owner only
+// (/admin/job). A PC can only upload to a job id that was issued to it, and the id is an unguessable secret.
+
+const CHUNK_MAX = 900 * 1024;            // one upload request
+const JOB_MAX_BYTES = 160 * 1024 * 1024; // refuse silly sizes
+const KEEP_SEC = 7 * 86400;
+
+function rid(n = 12) {
+  const b = crypto.getRandomValues(new Uint8Array(n));
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+function safeEq(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+// A PC proves itself either with a live licence bind token or with the shared relay key (so an
+// unlicensed / not-yet-logged-in PC can still be seen and debugged).
+async function relayAuth(env, o) {
+  const k = String(o.k || '');
+  if (env.RELAY_KEY && safeEq(k, env.RELAY_KEY)) return true;
+  const id = String(o.id || ''), token = String(o.token || '');
+  if (id && token) {
+    const b = await env.DB.prepare('SELECT 1 FROM binds WHERE id = ? AND token = ?').bind(id, token).first();
+    if (b) return true;
+  }
+  return false;
+}
+
+async function readBody(req, max) {
+  try {
+    const t = await req.text();
+    if (!t || t.length > max) return null;
+    const o = JSON.parse(t);
+    return o && typeof o === 'object' ? o : null;
+  } catch {
+    return null;
+  }
+}
+
+async function handlePoll(req, env) {
+  const o = await readBody(req, 65536);
+  if (!o) return json({ ok: false, reason: 'bad_request' }, 400);
+  const machine = String(o.machine || '').trim().slice(0, 80);
+  if (!machine) return json({ ok: false, reason: 'bad_request' }, 400);
+  if (!(await relayAuth(env, o))) return json({ ok: false, reason: 'forbidden' }, 403);
+  const t = now();
+  const status = JSON.stringify(o.status || {}).slice(0, 12000);
+  await env.DB.prepare(
+    `INSERT INTO agents (machine, pc, ver, lic, seen, status) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(machine) DO UPDATE SET
+       pc = CASE WHEN excluded.pc != '' THEN excluded.pc ELSE agents.pc END,
+       ver = CASE WHEN excluded.ver != '' THEN excluded.ver ELSE agents.ver END,
+       lic = CASE WHEN excluded.lic != '' THEN excluded.lic ELSE agents.lic END,
+       seen = excluded.seen, status = excluded.status`
+  ).bind(machine, String(o.pc || '').slice(0, 60), String(o.ver || '').slice(0, 20), String(o.id || '').slice(0, 64), t, status).run();
+  const rows = await env.DB.prepare(`SELECT id, cmd, arg FROM jobs WHERE machine = ? AND state = 'queued' ORDER BY created LIMIT 5`).bind(machine).all();
+  const jobs = rows.results || [];
+  for (const j of jobs) {
+    await env.DB.prepare(`UPDATE jobs SET state = 'sent' WHERE id = ?`).bind(j.id).run();
+  }
+  if (Math.random() < 0.01) await purge(env);
+  return json({ ok: true, jobs, t });
+}
+
+async function handleUp(req, env, url) {
+  const job = url.searchParams.get('job') || '';
+  const seq = parseInt(url.searchParams.get('seq') || '0', 10);
+  const total = parseInt(url.searchParams.get('total') || '1', 10);
+  const name = (url.searchParams.get('name') || '').slice(0, 120);
+  if (!/^[0-9a-f]{16,40}$/.test(job) || !(seq >= 0) || !(total >= 1) || seq >= total) return json({ ok: false, reason: 'bad_request' }, 400);
+  const row = await env.DB.prepare('SELECT machine, state, bytes FROM jobs WHERE id = ?').bind(job).first();
+  if (!row || row.state === 'done' || row.state === 'queued') return json({ ok: false, reason: 'no_job' }, 404);
+  const data = await req.arrayBuffer();
+  if (!data.byteLength || data.byteLength > CHUNK_MAX) return json({ ok: false, reason: 'size' }, 413);
+  if (row.bytes + data.byteLength > JOB_MAX_BYTES) return json({ ok: false, reason: 'too_big' }, 413);
+  await env.DB.prepare('INSERT OR REPLACE INTO blobs (job, seq, data) VALUES (?, ?, ?)').bind(job, seq, data).run();
+  const c = await env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(data)), 0) AS b FROM blobs WHERE job = ?').bind(job).first();
+  const complete = c.n >= total;
+  await env.DB.prepare(
+    `UPDATE jobs SET chunks = ?, total = ?, bytes = ?, name = CASE WHEN ? != '' THEN ? ELSE name END,
+       state = CASE WHEN ? THEN 'done' ELSE state END, done = CASE WHEN ? THEN ? ELSE done END WHERE id = ?`
+  ).bind(c.n, total, c.b, name, name, complete ? 1 : 0, complete ? 1 : 0, now(), job).run();
+  return json({ ok: true, chunks: c.n, total, complete });
+}
+
+async function handleDone(req, env) {
+  const o = await readBody(req, 16384);
+  if (!o) return json({ ok: false, reason: 'bad_request' }, 400);
+  const job = String(o.job || '');
+  if (!/^[0-9a-f]{16,40}$/.test(job)) return json({ ok: false, reason: 'bad_request' }, 400);
+  const row = await env.DB.prepare('SELECT state FROM jobs WHERE id = ?').bind(job).first();
+  if (!row || row.state === 'queued') return json({ ok: false, reason: 'no_job' }, 404);
+  await env.DB.prepare('UPDATE jobs SET state = ?, done = ?, result = ? WHERE id = ?')
+    .bind(o.ok === false ? 'error' : 'done', now(), String(o.result || '').slice(0, 4000), job).run();
+  return json({ ok: true });
+}
+
+// Failure zips the app already tries to post on its own (jochul rounds that went wrong).
+async function handleDebugUpload(req, env, url) {
+  const id = (url.searchParams.get('id') || '').slice(0, 64);
+  const token = (url.searchParams.get('token') || '').slice(0, 128);
+  const reason = (url.searchParams.get('reason') || '').slice(0, 80);
+  if (!(await relayAuth(env, { id, token }))) return json({ ok: false, reason: 'forbidden' }, 403);
+  const data = new Uint8Array(await req.arrayBuffer());
+  if (!data.byteLength || data.byteLength > JOB_MAX_BYTES) return json({ ok: false, reason: 'size' }, 413);
+  const job = rid(10);
+  const n = Math.ceil(data.byteLength / CHUNK_MAX);
+  const t = now();
+  await env.DB.prepare(`INSERT INTO jobs (id, machine, cmd, arg, state, created, done, chunks, total, bytes, name) VALUES (?, ?, 'autodebug', ?, 'sent', ?, 0, 0, ?, ?, ?)`)
+    .bind(job, 'lic:' + id, reason, t, n, data.byteLength, 'jochul_' + job + '.zip').run();
+  for (let i = 0; i < n; i++) {
+    await env.DB.prepare('INSERT INTO blobs (job, seq, data) VALUES (?, ?, ?)').bind(job, i, data.slice(i * CHUNK_MAX, (i + 1) * CHUNK_MAX).buffer).run();
+  }
+  await env.DB.prepare(`UPDATE jobs SET state = 'done', chunks = ?, done = ? WHERE id = ?`).bind(n, now(), job).run();
+  return json({ ok: true, job });
+}
+
+async function purge(env) {
+  const cut = now() - KEEP_SEC;
+  await env.DB.prepare('DELETE FROM blobs WHERE job IN (SELECT id FROM jobs WHERE created < ?)').bind(cut).run();
+  await env.DB.prepare('DELETE FROM jobs WHERE created < ?').bind(cut).run();
+}
+
+async function relayAdmin(req, env, url) {
+  const p = url.pathname;
+  if (p === '/admin/agents' && req.method === 'GET') {
+    const r = await env.DB.prepare('SELECT machine, pc, ver, lic, seen, status FROM agents ORDER BY pc').all();
+    const t = now();
+    const rows = (r.results || []).map((a) => {
+      let st = {};
+      try { st = JSON.parse(a.status || '{}'); } catch { /* keep {} */ }
+      return { machine: a.machine, pc: a.pc, ver: a.ver, lic: a.lic, age: t - a.seen, status: st };
+    });
+    return json({ ok: true, rows });
+  }
+  if (p === '/admin/job' && req.method === 'POST') {
+    const o = await readBody(req, 8192);
+    if (!o) return json({ ok: false, reason: 'bad_request' }, 400);
+    const cmd = String(o.cmd || '');
+    if (!['log', 'shot', 'ls', 'pull', 'stop'].includes(cmd)) return json({ ok: false, reason: 'bad_cmd' }, 400);
+    let machine = String(o.machine || '');
+    if (!machine && o.pc) {
+      const a = await env.DB.prepare('SELECT machine FROM agents WHERE pc = ? ORDER BY seen DESC LIMIT 1').bind(String(o.pc)).first();
+      machine = a ? a.machine : '';
+    }
+    if (!machine) return json({ ok: false, reason: 'unknown_pc' }, 404);
+    const id = rid(10);
+    await env.DB.prepare(`INSERT INTO jobs (id, machine, cmd, arg, state, created) VALUES (?, ?, ?, ?, 'queued', ?)`)
+      .bind(id, machine, cmd, String(o.arg || '').slice(0, 300), now()).run();
+    return json({ ok: true, job: id, machine });
+  }
+  if (p === '/admin/job' && req.method === 'GET') {
+    const row = await env.DB.prepare('SELECT * FROM jobs WHERE id = ?').bind(url.searchParams.get('id') || '').first();
+    return row ? json({ ok: true, job: row }) : json({ ok: false, reason: 'no_job' }, 404);
+  }
+  if (p === '/admin/jobs' && req.method === 'GET') {
+    const r = await env.DB.prepare('SELECT id, machine, cmd, arg, state, created, bytes, name, result FROM jobs ORDER BY created DESC LIMIT 30').all();
+    return json({ ok: true, rows: r.results || [] });
+  }
+  if (p === '/admin/blob' && req.method === 'GET') {
+    const id = url.searchParams.get('job') || '';
+    const row = await env.DB.prepare('SELECT state, total, name FROM jobs WHERE id = ?').bind(id).first();
+    if (!row) return json({ ok: false, reason: 'no_job' }, 404);
+    let i = 0;
+    const stream = new ReadableStream({
+      async pull(ctrl) {
+        if (i >= row.total) { ctrl.close(); return; }
+        const c = await env.DB.prepare('SELECT data FROM blobs WHERE job = ? AND seq = ?').bind(id, i).first();
+        if (!c) { ctrl.error(new Error('missing chunk ' + i)); return; }
+        ctrl.enqueue(new Uint8Array(c.data));
+        i++;
+      },
+    });
+    return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'x-job-state': row.state, 'x-name': encodeURIComponent(row.name || id) } });
+  }
+  if (p === '/admin/purge' && req.method === 'POST') {
+    await purge(env);
+    return json({ ok: true });
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- entry
 
 export default {
@@ -305,11 +494,17 @@ export default {
     try {
       if (p.startsWith('/admin/')) {
         if (!(await isAdmin(req, env))) return json({ ok: false, reason: 'forbidden' }, 403);
+        const ra = await relayAdmin(req, env, url);
+        if (ra) return ra;
         return await admin(req, env, url);
       }
       if (p === '/auth' && req.method === 'POST') return await handleAuth(req, env);
       if (p === '/heartbeat' && req.method === 'POST') return await handleHeartbeat(req, env);
       if (p === '/appear' && req.method === 'POST') return await handleAppear(req, env);
+      if (p === '/agent/poll' && req.method === 'POST') return await handlePoll(req, env);
+      if (p === '/agent/up' && req.method === 'POST') return await handleUp(req, env, url);
+      if (p === '/agent/done' && req.method === 'POST') return await handleDone(req, env);
+      if (p === '/debug/jochul' && req.method === 'POST') return await handleDebugUpload(req, env, url);
       if (p === '/health') return json({ ok: true, t: now() });
       return json({ ok: false, reason: 'not_found' }, 404);
     } catch (e) {

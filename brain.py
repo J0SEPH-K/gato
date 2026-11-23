@@ -1728,6 +1728,9 @@ class Brain:
                     meta['passed'] = passed
                     if passed:
                         self._log(f'{p}조철 클릭 후 창 닫힘 (정답 여부는 게임이 알려주지 않음 — 확인 불가)')
+                        # Upload EVERY round (not only failures): a closed box is not proof of a right answer, and the
+                        # frames are the only way to check the tracker offline. Thinned to stay small.
+                        self._upload_jochul_debug(frames[::2], times[::2], f'{p}closed (answer={answer})', meta=dict(meta), first_img=frame)
                         if dump:
                             self._write_meta(dump, meta)
                     else:
