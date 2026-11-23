@@ -28,6 +28,8 @@ MINIMAL_BASE_TOLERANCE_PX = 12.0
 ALLY_REF_UV = (0.44, 0.45)
 LINK_DILATE = 5
 MIN_SQUAD_PX = 12
+ENTRY_SETTLE_POLLS = 12      # extra captures while the battle minimap fills in
+ENTRY_SETTLE_GAP_S = 0.15
 DEFAULT_OPTS = {
     'squad_counts': [
         2,
@@ -82,14 +84,19 @@ def is_main(frame):
     return vision.is_scene(frame, 'main')
 
 
-def wait_for_main(io, log, max_frames = 100, stop = None):
+# A battle that already had its attack commands issued needs ~25 s to resolve before the main screen
+# returns (measured on finevt-7 2026-11-23: attack 15:49:18, main again 15:49:38); the old 100 x 0.1 s
+# wait gave up after 10 s, called _stop_now and left the run dead. 600 x 0.1 s = 60 s.
+RETREAT_WAIT_FRAMES = 600
+
+def wait_for_main(io, log, max_frames = RETREAT_WAIT_FRAMES, stop = None):
     for _ in range(max_frames):
         if stop and stop():
             return False
         if is_main(io.capture()):
             return True
         time.sleep(0.1)
-    log('퇴각실패 (100루프 내 메인 복귀 실패)')
+    log(f'퇴각실패 ({max_frames}루프 내 메인 복귀 실패)')
     return False
 
 
@@ -591,6 +598,24 @@ def run_battle(io, opts = None, log = print, detect = None, should_stop = None, 
         return 'no-frame'
     st = analyze(crop_minimap(frame))
     (box, ally, enemies) = (st['box'], st['ally'], st['enemies'])
+    # The minimap is still fading in on the first frames of a battle: 12 of 58 saved skip frames
+    # on finevt-7 had no dots at all and the rest showed partial/dim dots, so a single early frame
+    # sent the run into an instant retreat (measured 2 attacks in 57 battle entries). Poll for the
+    # minimap to settle before giving up.
+    polls = 0
+    while (not box or not ally or not enemies) and polls < ENTRY_SETTLE_POLLS and not stop():
+        time.sleep(ENTRY_SETTLE_GAP_S)
+        fr = io.capture()
+        if fr is None:
+            continue
+        polls += 1
+        if not is_battle(fr):
+            break
+        frame = fr
+        st = analyze(crop_minimap(frame))
+        (box, ally, enemies) = (st['box'], st['ally'], st['enemies'])
+    if polls and box and ally and enemies:
+        log(f'전투: 미니맵 안정화 대기 {polls}회 후 검출 성공 (적 {len(enemies)}부대)')
     if not box or not ally or not enemies:
         log(f'''전투: 검출 부족 — 퇴각·집계 (박스 {'O' if box else 'X'} / 아군 {'O' if ally else 'X'} / 적 {len(enemies)}부대)''')
         _save_skip_frame(o, frame, box, ally, enemies)

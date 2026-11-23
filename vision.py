@@ -153,6 +153,14 @@ def check_triggers(img: np.ndarray) -> set[str]:
     for name, regions in TRIGGERS.items():
         if all(_px_sum(img, x0, y0, x1, y1) == s for x0, y0, x1, y1, s in regions):
             fired.add(name)
+    if '포만감 템 없음' in fired:
+        # The two exact-sum pixels sit at screen centre, i.e. on the player's own sprite: a white
+        # pixel pair there matched on a perfectly normal frame (measured live on finevt-7 2026-11-23:
+        # (230,230,230) x2 at (573,426) with the gauge at 97%) and stopped every run. A real
+        # "no food" popup only matters when the gauge is low, so a readable, healthy gauge vetoes it.
+        frac = food_fraction(img)
+        if frac is not None and frac >= FOOD_LOW_FRAC:
+            fired.discard('포만감 템 없음')
     if len(fired) >= IMPLAUSIBLE_TRIGGER_COUNT:
         # Real triggers almost never co-occur more than 1-2 at a time. Seeing
         # this many at once (observed live 2026-11-18 during a Christmas-event
