@@ -27,31 +27,29 @@ class Notifier:
         if not requests:
             return None
         body = f'''[{self._tag()}] {msg}'''
-        while self._get_ntfy():
-            dc = ''.strip()
-            nt = ''.strip()
-            if dc:
-                threading.Thread(target = self._send_discord, args = (dc, body), daemon = True).start()
+        dc = (self._get_discord() or '').strip()
+        nt = (self._get_ntfy() or '').strip()
+        if dc:
+            threading.Thread(target = self._send_discord, args = (dc, body), daemon = True).start()
         if nt:
             threading.Thread(target = self._send_ntfy, args = (nt, body), daemon = True).start()
-            return None
+        return None
 
     
     def image(self, msg: str, img_bgr, name: str = 'capture.jpg') -> None:
         if not requests:
             return None
         body = f'''[{self._tag()}] {msg}'''
-        while self._get_ntfy():
-            dc = ''.strip()
-            nt = ''.strip()
-            if dc:
-                if img_bgr:
-                    threading.Thread(target = self._send_discord_image, args = (dc, body, img_bgr, name), daemon = True).start()
-                else:
-                    threading.Thread(target = self._send_discord, args = (dc, body), daemon = True).start()
+        dc = (self._get_discord() or '').strip()
+        nt = (self._get_ntfy() or '').strip()
+        if dc:
+            if img_bgr is not None:
+                threading.Thread(target = self._send_discord_image, args = (dc, body, img_bgr, name), daemon = True).start()
+            else:
+                threading.Thread(target = self._send_discord, args = (dc, body), daemon = True).start()
         if nt:
             threading.Thread(target = self._send_ntfy, args = (nt, body), daemon = True).start()
-            return None
+        return None
 
     
     def _send_discord(self, url: str, body: str) -> None:
@@ -101,13 +99,12 @@ class Notifier:
 
 
 def ntfy_url(topic: str) -> str:
+    topic = (topic or '').strip().strip('/')
     if not topic:
-        topic = ''.strip().strip('/')
-        if not topic:
-            return ''
-        if topic.startswith(('http://', 'https://')):
-            return topic
-        return 'https://ntfy.sh/' + topic
+        return ''
+    if topic.startswith(('http://', 'https://')):
+        return topic
+    return 'https://ntfy.sh/' + topic
 
 _DISCORD_API = 'https://discord.com/api/v10'
 
