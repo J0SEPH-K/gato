@@ -57,15 +57,29 @@ ans, info = jochul.track_centroids(np.array([0.0, 0.5]), scattered, start_slot=1
 check('no usable row -> None, not a silent wrong guess', ans is None, (ans, info))
 
 # --- real labelled round: the one actual client capture confirmed correct by the user ---
+# This needs the REAL torch/ultralytics, not a stub: dev/mock/mac_stub.py does
+# sys.modules.setdefault('torch', MagicMock()) (and the same for ultralytics) for OTHER tests
+# that only need win32 calls faked. If mac_stub is imported before this file (as the harness
+# pattern `python3 -c "import mac_stub, runpy; ..."` does for every other dev/test_*.py), that
+# setdefault wins the race and `import torch` below silently returns the MagicMock - no
+# exception, so the old `except Exception: HAVE_MODEL=False` never caught it. The real model
+# then never runs: predict() returns a MagicMock, `for bi, res in enumerate(results)` iterates
+# zero times (MagicMock's default __iter__), every frame gets zero detections, and the test
+# fails with "no start/end row found" - which looks exactly like a tracker regression but is a
+# harness bug. Run this file directly (`python3 dev/test_jochul_tracker.py`, no mac_stub) or
+# import this module before mac_stub in any combined run. Guard here so a future accidental
+# mac_stub-first invocation SKIPs with a clear reason instead of reporting a fake FAIL.
 try:
     import torch  # noqa: F401
     from ultralytics import YOLO  # noqa: F401
-    HAVE_MODEL = True
+    HAVE_MODEL = (type(torch).__module__ != 'unittest.mock'
+                  and type(YOLO).__module__ != 'unittest.mock')
 except Exception:
     HAVE_MODEL = False
 
 if not HAVE_MODEL:
-    print('SKIP real-round test (torch/ultralytics not installed in this interpreter)')
+    print('SKIP real-round test (torch/ultralytics not installed, or mac_stub.py pre-mocked '
+          'them in sys.modules - run this file directly, without importing mac_stub first)')
 else:
     import cv2
     fdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'jochul_round1')
