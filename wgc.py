@@ -37,6 +37,9 @@ def available() -> bool:
     return WindowsCapture is not None
 def import_error() -> str | None:
     return _import_err
+# The WGC buffer is the whole window (extended frame bounds), so the client area sits at
+# ClientToScreen(0,0) - ef.left/top inside it. The (-1,-1) nudge is what the whole TRIGGERS
+# table was calibrated against -- keep it unless every trigger region is re-measured too.
 RENDER_SHIFT = ((-1), (-1))
 def _client_box(hwnd: int):
     rc = wt.RECT()

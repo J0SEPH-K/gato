@@ -658,8 +658,45 @@ def _assign_optimal(cost):
     return np.array(best_rows), np.array(best_cols)
 
 
-def _in_row(pts):
-    return len(pts) >= 5 and np.std([p[1] for p in pts]) < 14 and abs(np.median([p[1] for p in pts]) - TRACK_ROW_Y) < 40
+ROW_FIT_PX = 34.0  # max |x - slot x| any point of a row may have and still count as on-grid
+RECENT_WIN = 12    # frames of match history inspected at the extrapolated end
+RECENT_NEED = 3    # matches that history must contain for the final positions to count as measured
+
+
+def _fit_row(pts):
+    """(max_dx, points sorted left to right) for the 5-subset of pts that best matches the slot grid."""
+    import itertools
+    arr = np.asarray(pts, float).reshape(-1, 2)
+    best = None
+    for sub in itertools.combinations(range(len(arr)), 5):
+        cand = arr[list(sub)]
+        cand = cand[np.argsort(cand[:, 0])]
+        dx = float(np.max(np.abs(cand[:, 0] - TRACK_SLOT_X)))
+        if best is None or dx < best[0]:
+            best = (dx, cand)
+    return best
+
+
+def _row_fit(pts):
+    """Five settled characters standing ON the slot grid -> (max_dx, points left to right), else None.
+
+    The old test (`_in_row`) only required five points with a flat y and never looked at x, so a row
+    that had nothing to do with the board's five slots still counted as an anchor. Worse, when more
+    than five points were detected it took `sorted(...)[:5]`, which silently drops whichever point
+    sorts last - one stray detection shifts every slot index by one, and the tracker then confidently
+    follows the wrong character (5/5 unanimous on two real customer rounds, both wrong). So: choose
+    the subset by fit to the real slot grid, and treat a row that does not fit as no anchor at all.
+    """
+    pts = np.asarray(pts, float).reshape(-1, 2)
+    if len(pts) < 5:
+        return None
+    best = _fit_row(pts)
+    if best is None or best[0] > ROW_FIT_PX:
+        return None
+    cand = best[1]
+    if np.std(cand[:, 1]) >= 14 or abs(float(np.median(cand[:, 1])) - TRACK_ROW_Y) >= 40:
+        return None
+    return best
 
 
 def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
@@ -698,20 +735,21 @@ def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
     fallback; the START anchor still requires a real clean row.)
     """
     n = len(dets)
-    s = next((i for i, d in enumerate(dets) if _in_row(d)), None)
+    s = next((i for i, d in enumerate(dets) if _row_fit(d)), None)
     if s is None:
-        return None, 'no start row found'
-    e_clean = next((i for i in range(n - 1, -1, -1) if _in_row(dets[i])), None)
+        return None, 'no start row on the slot grid'
+    e_clean = next((i for i in range(n - 1, -1, -1) if _row_fit(dets[i])), None)
     use_clean_end = e_clean is not None and e_clean > s and e_clean >= s + (n - s) * 0.5
     e = e_clean if use_clean_end else n - 1
     if e <= s:
         return None, 'start row too close to end of recording'
-    pos = np.array(sorted(dets[s], key=lambda p: p[0])[:5] if len(dets[s]) == 5
-                   else sorted(dets[s], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
-    pos = pos[np.argsort(pos[:, 0])]
+    start_fit = _row_fit(dets[s])
+    assert start_fit is not None  # guaranteed by the `s is None` check above
+    pos = start_fit[1]
     vel = np.zeros((5, 2))
     last = times[s]
     coast = 0
+    recent = []  # matched-detection count per frame, last RECENT_WIN frames only
     for i in range(s + 1, e + 1):
         dt = max(1e-3, times[i] - last)
         last = times[i]
@@ -732,13 +770,16 @@ def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
                     pos[a] = pred[a]
                     vel[a] *= decay
                     coast += 1
+            recent = (recent + [len(matched)])[-RECENT_WIN:]
         else:
             pos = pred
             vel *= decay
             coast += 5
+            recent = (recent + [0])[-RECENT_WIN:]
     if use_clean_end:
-        fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
-        fin = fin[np.argsort(fin[:, 0])]
+        end_fit = _row_fit(dets[e])
+        assert end_fit is not None  # use_clean_end means e is an e_clean frame
+        fin = end_fit[1]
     else:
         # Extrapolated-end case: the assumed-settled canonical grid is only trustworthy if the
         # tracked character has actually STOPPED moving by the last captured frame. Found
@@ -753,7 +794,18 @@ def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
         tracked_speed = float(np.linalg.norm(vel[start_slot - 1]))
         if tracked_speed > MAX_SETTLE_SPEED:
             return None, 'tracked character still moving at capture end (%.0f px/s)' % tracked_speed
-        fin = np.stack([TRACK_SLOT_X, np.full(5, TRACK_ROW_Y)], axis=1)
+        # The tracked character stopping is not enough on its own: the whole row has to have landed
+        # on the slots. Bucketing scattered points against the fixed grid is a guess that all five
+        # ensemble settings make identically, so it votes 5/5 and looks certain while being wrong.
+        # ...and the positions have to be actual measurements, not extrapolation. If nothing matched
+        # near the end, `pos` is just the decaying prediction from the START row, so fitting it to the
+        # grid returns the start slot - the zero-motion no-op that reads as maximal confidence.
+        if sum(recent) < RECENT_NEED:
+            return None, 'almost nothing detected near the capture end (%d matches in the last %d frames)' % (sum(recent), len(recent))
+        fit = _row_fit(pos)
+        if fit is None:
+            return None, 'tracked positions not settled on the slot grid at capture end'
+        fin = fit[1]
     C = np.linalg.norm(pos[:, None, :] - fin[None, :, :], axis=2)
     r, c = _assign_optimal(C)
     m = {int(a): int(b) + 1 for a, b in zip(r, c)}

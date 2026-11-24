@@ -81,7 +81,11 @@ _IDLE_WARNING_TEMPLATE_PATH = os.path.join(_ASSET_DIR, 'idle_warning.png')
 _idle_warning_template = None
 IDLE_WARNING_MATCH_THRESHOLD = 0.88
 # button center, measured relative to the template's own top-left corner
-IDLE_WARNING_CONFIRM_OFFSET = (250, 107)
+# Offset of the confirm button inside idle_warning.png. Re-measured live 2026-11-23 on
+# a real popup: template re-cropped to (380,360)-(660,500), button centre at client
+# (612,473) = +232/+113. The old template scored only 0.75 against the real dialog
+# (below the 0.88 gate) so the bot never clicked it and got kicked to login instead.
+IDLE_WARNING_CONFIRM_OFFSET = (232, 113)
 
 
 def _load_idle_warning_template():

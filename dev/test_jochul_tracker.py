@@ -56,6 +56,30 @@ scattered = [[(100, 300)], [(120, 310)]]
 ans, info = jochul.track_centroids(np.array([0.0, 0.5]), scattered, start_slot=1)
 check('no usable row -> None, not a silent wrong guess', ans is None, (ans, info))
 
+# --- row fit: the anchor row must be the board's five SLOTS, not just five flat points ---
+# A sixth stray detection used to be handled by `sorted(...)[:5]`, which drops whichever point sorts
+# last - shifting every slot index by one and making the tracker follow the wrong character while all
+# five ensemble settings agreed (5/5) on two real customer rounds, both WRONG.
+stray = [(65, 140), (145, 140), (225, 140), (305, 140), (385, 140), (700, 141)]
+fit = jochul._row_fit(stray)
+check('a stray 6th detection is excluded, not sorted in and shifting the slots',
+      fit is not None and [round(x) for x in fit[1][:, 0]] == [65, 145, 225, 305, 385], fit)
+
+# five flat points that are NOT on the slot grid are not an anchor
+check('five flat but off-grid points are rejected as an anchor',
+      jochul._row_fit([(100, 140), (180, 140), (260, 140), (340, 140), (420, 140)]) is None)
+
+# a genuine settled row with a few px of detector jitter must still fit
+check('a real row with a few px of detector jitter still fits',
+      jochul._row_fit([(71, 140), (140, 141), (225, 139), (309, 140), (378, 142)]) is not None)
+
+# extrapolated end, tracked character stopped, but the row is scattered off-grid -> None
+sc = [[(65, 140), (145, 140), (225, 140), (305, 140), (385, 140)]]
+sc += [[(100, 300), (200, 310), (300, 320), (400, 330), (500, 340)] for _ in range(3)]
+ans, info = jochul.track_centroids(np.arange(4) * 0.1, sc, start_slot=1)
+check('extrapolated end on scattered points -> None (not a confident wrong grid guess)',
+      ans is None, (ans, info))
+
 # --- real labelled round: the one actual client capture confirmed correct by the user ---
 # This needs the REAL torch/ultralytics, not a stub: dev/mock/mac_stub.py does
 # sys.modules.setdefault('torch', MagicMock()) (and the same for ultralytics) for OTHER tests
