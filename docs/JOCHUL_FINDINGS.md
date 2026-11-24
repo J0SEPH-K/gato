@@ -102,3 +102,30 @@ fragile than the swap decoders (which were wrong AND unstable across tunings), n
 A real hit rate still needs many more labelled live rounds - every round keeps recording as before
 (`debug/jochul_rounds`), and the fixture `dev/fixtures/jochul_round1` now also serves as a permanent
 regression test (`dev/test_jochul_tracker.py`) so this exact real case can never silently regress.
+
+## 2026-11-24 - the medallion is a client asset, and matching it wins
+
+The medallion is not gold. Decoded `Assets/Textures/UI/SecretInspector/Mapae.AGF` (10 frames, 40x65,
+vertical bob y2 -> y61): a cyan/turquoise pendant on a navy ribbon. The old H14-30 "gold" window in
+`find_marker_slot` could only ever hit it by accident, which is why the detector scored at chance and
+the whole round leaned on YOLO tracking.
+
+The asset list is right there in the client: `assets/textures/ui/SecretInspector/` holds
+inspector{Bear,Bison,Horse,Hyena,Tiger}, Board, Mapae, Songpyeon, RiceStraw and their _Outline twins,
+loaded by the constructor at RVA 0x8cc279..0x8cc4d9 (`lea rdx` = asset path, `lea rcx` = the loader
+string 0x12fb3e10). The puzzle object is a `CSecretInspector_Parser` singleton.
+
+Fix: `jochul.marker_scores()` masked-matches the shipped sprite frame 4 (TM_CCORR_NORMED, alpha mask,
++/-45 px window per slot, top 130 px band) and `find_marker_slot` returns None unless the winner beats
+the runner-up by MARKER_GAP. `marker_lock` needs 4 agreeing readings inside a 6-frame sliding window,
+because the medallion is only on screen ~13% of the round and blinks between bobs.
+
+REVEAL_GUARD_S = 5.0 matters: the medallion also floats over the START slot during the intro. Without
+the guard the intro burst locks the start slot and the macro answers the wrong one.
+
+Measured on `dev/fixtures/jochul_round1` (207 frames, first=2, truth=5): start slot locked at f10,
+reveal slot 5 locked at t=20.08 s - both correct, answer reached before the 22 s capture window closes.
+`dev/test_jochul_marker.py` pins that (7 tests), plus the "guard removed answers 2" case.
+
+Still unverified: whether the reveal burst is always inside the capture window for a fast shuffle; the
+tracker fallback stays wired for that.

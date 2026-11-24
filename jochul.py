@@ -3,12 +3,20 @@
 # Bytecode version: 3.11a7e (3495)
 # Source timestamp: 2026-08-17 09:30:58 UTC (1786959058)
 
+import os
+import sys
 import threading
 import time
 from collections import Counter
 import cv2
 import numpy as np
+
+MARKER_GAP = 0.03
+MARKER_NEED = 4
+MARKER_WIN = 6
 REGION = (287, 231, 734, 582)
+MARKER_BAND_Y1 = 130
+MARKER_WIN_X = 45
 PARK_XY = (292, 167)
 CLICK_Y = 373
 CLICK_X = {1: 352, 2: 432, 3: 512, 4: 592, 5: 672}
@@ -50,23 +58,120 @@ def find_first_tile(region_img):
             if x <= limit:
                 return slot
         return 5
+_MAPAE_TMPL = None
+_MAPAE_MASK = None
+
+
+def _decode_agf(path):
+    """Minimal .AGF decoder -> (frames as RGBA arrays, per-frame rects, canvas size).
+
+    Inlined instead of importing agf.py so there is no import-order ambiguity between the repo-root
+    copy and dev/tools, and nothing extra to add to the PyInstaller spec. Format: u32 magic 0x23,
+    u32 max_w, u32 max_h, u32 frame_count; frame offsets at 0x4C0; i16 x/y/w/h rects at 0x970; then
+    per-frame blocks, each with the zlib size at +0x2C and the stream at +0x30. Pixels are A,R,G,B
+    with (A=0,R=n,G=0,B=0) encoding a run of n transparent pixels.
+    """
+    import struct
+    import zlib
+    data = open(path, 'rb').read()
+    magic, max_w, max_h, n = struct.unpack_from('<4I', data, 0)
+    if magic != 0x23:
+        raise ValueError('not an AGF: %#x' % magic)
+    base = 0x970 + 8 * n
+    usize = struct.unpack_from('<I', data, base)[0]
+    zsize = struct.unpack_from('<I', data, base + 0x2C)[0]
+    buf = zlib.decompress(data[base + 0x30: base + 0x30 + zsize])
+    if len(buf) != usize:
+        raise ValueError('AGF size mismatch %d/%d' % (len(buf), usize))
+    offs = list(struct.unpack_from('<%dI' % n, data, 0x4C0)) + [len(buf)]
+    frames, rects = [], []
+    for i in range(n):
+        x, y, w, h = struct.unpack_from('<4h', data, 0x970 + 8 * i)
+        a = np.frombuffer(buf[offs[i]:offs[i + 1]], np.uint8).reshape(-1, 4)
+        out = np.zeros((w * h, 4), np.uint8)
+        pos = 0
+        run = (a[:, 0] == 0) & (a[:, 2] == 0) & (a[:, 3] == 0)
+        for k in range(len(a)):
+            if pos >= w * h:
+                break
+            if run[k]:
+                pos += int(a[k, 1])
+            else:
+                out[pos] = (a[k, 1], a[k, 2], a[k, 3], a[k, 0])
+                pos += 1
+        frames.append(out.reshape(h, w, 4))
+        rects.append((x, y, w, h))
+    return frames, rects, (max_w, max_h)
+
+
+def _load_mapae():
+    """Lazy-load the shipped Mapae.AGF medallion sprite as a masked grey template.
+
+    The medallion is a client asset, not something we drew: assets/textures/ui/SecretInspector/Mapae.agf
+    ships in the install and the repo copy is byte-identical. The middle frame is the settled bob pose,
+    which is the pose that shows on the reveal, and template matching it is skin-independent (no gold
+    HSV window, so a pink-haired or dark-armoured character cannot break it).
+    """
+    global _MAPAE_TMPL, _MAPAE_MASK
+    if _MAPAE_TMPL is not None:
+        return _MAPAE_TMPL
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'medallion', 'Mapae.AGF')
+    frames, rects, (max_w, max_h) = _decode_agf(path)
+    i = min(4, len(frames) - 1)
+    canvas = np.zeros((max_h, max_w, 4), np.uint8)
+    x, y, w, h = rects[i]
+    canvas[y:y + h, x:x + w] = frames[i]
+    _MAPAE_TMPL = cv2.cvtColor(np.ascontiguousarray(canvas[..., :3]), cv2.COLOR_BGR2GRAY)
+    _MAPAE_MASK = (canvas[..., 3] > 128).astype(np.uint8) * 255
+    return _MAPAE_TMPL
+
+
+def marker_scores(region_img):
+    """Per-slot medallion correlation (1..5) over the bob band above the row."""
+    tmpl = _load_mapae()
+    grey = cv2.cvtColor(np.ascontiguousarray(region_img), cv2.COLOR_BGR2GRAY)
+    band = grey[:min(grey.shape[0], MARKER_BAND_Y1)]
+    out = {}
+    for slot in (1, 2, 3, 4, 5):
+        cx = CLICK_X[slot] - REGION[0]
+        lo, hi = max(0, cx - MARKER_WIN_X), min(band.shape[1], cx + MARKER_WIN_X)
+        sub = band[:, lo:hi]
+        if sub.shape[0] < tmpl.shape[0] or sub.shape[1] < tmpl.shape[1]:
+            out[slot] = -1.0
+            continue
+        res = cv2.matchTemplate(sub, tmpl, cv2.TM_CCORR_NORMED, mask=_MAPAE_MASK)
+        out[slot] = float(res.max())
+    return out
+
+
 def find_marker_slot(region_img):
-    """Slot (1-5) under the floating gold 마패 medallion, or None. Skin-independent: it looks for the
-    medallion's colour, not for the character sprite (the pixel pattern in find_first_tile is the
-    navy hair of one skin). The medallion bobs, so call it on several frames and vote (see vote_marker)."""
-    import cv2
-    hsv = cv2.cvtColor(np.ascontiguousarray(region_img), cv2.COLOR_BGR2HSV)
-    m = ((hsv[..., 0] >= 14) & (hsv[..., 0] <= 30) & (hsv[..., 1] >= 140) & (hsv[..., 2] >= 170)).astype(np.uint8)
-    n, _, st, cen = cv2.connectedComponentsWithStats(m, 8)
-    best = None
-    for i in range(1, n):
-        a = int(st[i, 4])
-        if 60 <= a <= 900 and (best is None or a > best[0]):
-            best = (a, float(cen[i][0]))
-    if best is None:
+    """Slot (1-5) under the floating medallion, or None when it is not on screen.
+
+    Returns None unless the best slot beats the runner-up by MARKER_GAP, so frames where the
+    medallion is between bobs (or hidden) score as absent instead of guessing. Call it on several
+    frames and vote (see vote_marker)."""
+    scores = marker_scores(region_img)
+    ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+    if not ranked or ranked[0][1] <= 0:
         return None
-    xs = [CLICK_X[k] - REGION[0] for k in (1, 2, 3, 4, 5)]
-    return 1 + int(np.argmin([abs(best[1] - x) for x in xs]))
+    if ranked[0][1] - ranked[1][1] < MARKER_GAP:
+        return None
+    return ranked[0][0]
+
+
+def marker_lock(votes, reading):
+    """Return the agreed slot once MARKER_NEED of the last MARKER_WIN readings agree, else None.
+
+    The medallion bobs in and out (it is on screen only ~13% of a round), so a plain run-length
+    vote never fires; a short sliding window tolerates the gaps but still needs a real burst, so a
+    single stray frame cannot lock the wrong slot.
+    """
+    votes.append(reading)
+    seen = [v for v in votes[-MARKER_WIN:] if v]
+    if len(seen) < MARKER_NEED:
+        return None
+    slot, n = Counter(seen).most_common(1)[0]
+    return slot if n >= MARKER_NEED else None
 
 
 def vote_marker(slots):
@@ -761,6 +866,10 @@ SETTLE_MARGIN = 20
 SETTLE_GOLD_MIN = 40
 SETTLE_NEED = 4
 READ_CAP_S = 19.5
+# The medallion also shows during the intro (before the shuffle starts), so medallion votes are
+# only trusted once this many seconds of the recording have elapsed; otherwise the intro burst
+# would lock the START slot and we would answer the wrong one.
+REVEAL_GUARD_S = 5.0
 ROW_BAND = (slice(100, 225), slice(40, 410))
 
 

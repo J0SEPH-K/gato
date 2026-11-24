@@ -1557,10 +1557,9 @@ class Brain:
                 if frame is not None:
                     _reg = jochul.crop_region(frame)
                     _pattern_seen.append(jochul.find_first_tile(_reg))
-                    # skin-independent: the gold 마패 medallion floating over the marked character
-                    _marker_seen.append(jochul.find_marker_slot(_reg))
-                    _mv = jochul.vote_marker(_marker_seen)
-                    if _mv and _marker_seen.count(_mv) >= 3:
+                    # skin-independent: the shipped Mapae sprite matched over the marked character
+                    _locked = jochul.marker_lock(_marker_seen, jochul.find_marker_slot(_reg))
+                    if _locked:
                         break
                 if time.time() - _t_ref > 1.6:
                     break
@@ -1584,9 +1583,20 @@ class Brain:
                 else:
                     self._log(f'{p}조철 첫 마패: {first}번')
                     rec_hwnd = hwnd or self.engine.hwnd or find_window()
-                    st = {'prev': None, 'still': 0, 'votes': [], 'locked': None, 'focused': False, 'focus_th': None}
+                    st = {'prev': None, 'still': 0, 'votes': [], 'marker_votes': [], 'marker': None,
+                          'locked': None, 'focused': False, 'focus_th': None}
 
                     def _on_frame(i, frame, t):
+                        # The medallion reappears over the true holder near the end of the shuffle;
+                        # that burst is the answer. Ignore it during the intro (it also shows there,
+                        # over the START slot) via REVEAL_GUARD_S.
+                        if t >= jochul.REVEAL_GUARD_S:
+                            # marker_lock returns the agreed slot, which is not necessarily this
+                            # frame's reading: the frame may have landed in a bob gap.
+                            _hit = jochul.marker_lock(st['marker_votes'], jochul.find_marker_slot(frame))
+                            if _hit and st['marker'] is None:
+                                st['marker'] = _hit
+                                self._log(f'{p}조철 마패 재출현 → {_hit}번 ({t:.1f}s)')
                         band = jochul.row_band(frame)
                         if st['prev'] is not None:
                             d = float(np.mean(cv2.absdiff(band, st['prev'])))
@@ -1609,12 +1619,15 @@ class Brain:
                     time.sleep(max(0.0, jochul.SHUFFLE_DELAY - (time.time() - _t_ref)))
                     frames, times = jochul.record_all(
                         rec_hwnd, duration=jochul.READ_CAP_S, on_frame=_on_frame,
-                        stop=lambda: not self.running or st['locked'] is not None
+                        stop=lambda: not self.running or st['marker'] is not None
                     ) if rec_hwnd else ([], [])
                     if not self.running:
                         return
-                    answer = st['locked']
+                    answer = st['marker'] or st['locked']
+                    if st['marker']:
+                        self._log(f'{p}조철 마패 확정 → {st["marker"]}번 (표 {st["marker_votes"][-8:]})')
                     track_info = ''
+                    solve_s = 0.0
                     if answer is None:
                         _t0 = time.perf_counter()
                         answer, track_info = self.jochul_solver.solve_tracked(frames, times, first)
@@ -1668,7 +1681,8 @@ class Brain:
                     meta = {'ver': net.CODE_VER, 'first': first,
                             'n_ops': decoder_diag.get('n_ops'), 'ops': decoder_diag.get('ops', []),
                             'order': decoder_diag.get('order'), 'swap_decoder_answer': old_answer, 'answer': answer,
-                            'track_info': track_info, 'settle_votes': st['votes'],
+                            'track_info': track_info, 'settle_votes': st['votes'], 'marker': st['marker'],
+                            'marker_votes': st['marker_votes'],
                             'swap_decoder_error': decoder_diag.get('error'),
                             'attempts': [], 'passed': None,
                             'solve_s': round(solve_s, 2) if answer is not None and not st['locked'] else 0.0}

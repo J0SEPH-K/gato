@@ -3,6 +3,7 @@
 import os, sys, time, types
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
+import cv2
 import mock_loop as m
 import brain, jochul, config
 
@@ -24,19 +25,48 @@ def make(tile_after, marker_slot=None, track_answer=4):
         def _detect_missing(self, frames):
             return [None] * len(frames), [None] * len(frames)
     b.jochul_solver = Solver()
+    # The marker is the game's own Mapae sprite now, so the fake screen stamps the real decoded
+    # template (a plain gold circle does not match it). It bobs: visible ~40% of frames, like the
+    # client, which is what marker_lock's sliding window exists for.
+    tmpl = jochul._load_mapae()
+    mask = jochul._MAPAE_MASK
+    bgr = cv2.cvtColor(tmpl, cv2.COLOR_GRAY2BGR)
+
+    def _stamp(img, slot, ox, oy):
+        cx = ox + jochul.CLICK_X[slot] - jochul.REGION[0]
+        x0, y0 = cx - bgr.shape[1] // 2, oy + 20
+        sub = img[y0:y0 + bgr.shape[0], x0:x0 + bgr.shape[1]]
+        m = mask[:sub.shape[0], :sub.shape[1]] > 0
+        sub[m] = bgr[:sub.shape[0], :sub.shape[1]][m]
+
     # the live code now captures with jochul.record_all (wgc/capture internals, not brain.grab_hwnd),
     # so it is stubbed directly here with a plausible native-fps frame/time series
     n_fake = 300
-    def _fake_record_all(hwnd, duration=jochul.DURATION_S, stop=None):
-        time.sleep(1.2)  # gives the parallel RoundRecorder a realistic window to gather frames
-        return [np.zeros((4, 4, 3), np.uint8)] * n_fake, [round(i * duration / n_fake, 4) for i in range(n_fake)]
+
+    def _fake_record_all(hwnd, duration=jochul.DURATION_S, stop=None, on_frame=None):
+        time.sleep(0.4)  # gives the parallel RoundRecorder a realistic window to gather frames
+        frames, times = [], []
+        for i in range(n_fake):
+            t = round(i * duration / n_fake, 4)
+            f = np.full((351, 447, 3), (40, 100, 40), np.uint8)
+            if tile_after < 900 and t >= tile_after:
+                for (dx, dy), c in zip(((0, 0), (1, 0), (0, 1), (1, 1)), jochul._PAT1):
+                    f[100 + dy, 130 + dx] = c
+            if marker_slot and t >= jochul.REVEAL_GUARD_S and i % 5 < 2:
+                _stamp(f, marker_slot, 0, 0)
+            frames.append(f)
+            times.append(t)
+            if on_frame is not None:
+                on_frame(i, f, t)
+            if stop is not None and stop():
+                break
+        return frames, times
+
     jochul.record_all = _fake_record_all
     def cap():
         f = np.full((768, 1024, 3), (40, 100, 40), np.uint8)    # plain grass: no accidental pixel patterns
         if marker_slot and int((time.time() - t0) * 25) % 5 < 2:      # medallion bobs: visible ~40% of frames
-            import cv2
-            cx = jochul.CLICK_X[marker_slot] - jochul.REGION[0]
-            cv2.circle(f, (jochul.REGION[0] + cx, jochul.REGION[1] + 105), 9, (40, 190, 235), -1)   # BGR gold
+            _stamp(f, marker_slot, jochul.REGION[0], jochul.REGION[1])
         if tile_after < 900 and time.time() - t0 >= tile_after:
             x, y = 130, 100          # inside REGION; pattern the real first tile has
             ox, oy = jochul.REGION[0], jochul.REGION[1]
