@@ -12,6 +12,10 @@ hidden = (
        'watchdog', 'sprite_match', 'notify', 'net', 'dpi', 'wgc']
     # YOLO checkpoints unpickle classes from these packages at load time
     + collect_submodules('ultralytics')
+    # numpy 2.x moved its C internals under numpy._core; PyInstaller's hook misses
+    # the private exception module on some numpy builds, so the frozen exe dies
+    # with "No module named 'numpy._core._exceptions'". Collect them explicitly.
+    + collect_submodules('numpy._core')
 )
 
 datas = [
