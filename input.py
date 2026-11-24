@@ -8,6 +8,7 @@ import ctypes
 import ctypes.wintypes
 import os
 import queue
+import random
 import sys
 import threading
 import time
@@ -61,6 +62,14 @@ _M_RIGHTDOWN, _M_RIGHTUP = (8, 16)
 _M_MOVE = 1
 _M_ABSOLUTE = 32768
 _M_VIRTUALDESK = 16384
+# Input humanisation. XIGNCODE does not care that SendInput is used (a real mouse
+# goes through the same call), but a click that lands on the exact same integer
+# pixel every round with a fixed 80 ms hold is the cheapest thing to fingerprint.
+JITTER_PX = 2
+
+def _jit(v, amp=JITTER_PX):
+    """Gaussian jitter, clamped to +/-amp so a click never leaves its cell."""
+    return int(round(v + max(-amp, min(amp, random.gauss(0, amp / 2.0)))))
 def _send(inp: _INPUT) -> None:
     user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 def _abs_xy(sx: int, sy: int):
@@ -265,16 +274,17 @@ class Hands:
             if not hwnd:
                 return False
             else:
-                sx, sy = self._to_screen(hwnd, x, y)
+                sx, sy = self._to_screen(hwnd, _jit(x), _jit(y))
                 nx, ny = _abs_xy(sx, sy)
                 absf = _M_ABSOLUTE | _M_VIRTUALDESK
+                down_ms = max(0.02, down_ms * random.uniform(0.7, 1.35))
                 self._pin = None
                 if not self._land(sx, sy):
                     self._log(f'클릭 스킵 — 커서 안착 실패 ({sx},{sy})')
                     return False
                 self._set_pin(sx, sy)            # guard holds the cursor here through the click
                 _mouse_event(_M_MOVE | absf, nx, ny)
-                time.sleep(0.012)
+                time.sleep(random.uniform(0.008, 0.026))
                 if not self._land(sx, sy):
                     self._log(f'클릭 스킵 — 커서 이탈 ({sx},{sy})')
                     return False
