@@ -1298,8 +1298,7 @@ class Brain:
         Confirmed on two frames 0.4 s apart; every press is logged and a frame saved."""
         if frame is None:
             return False
-        occ = self._merc_occupied()
-        dead = vis.dead_mercs_v2(frame, occ)
+        dead = vis.dead_mercs_v3(frame)
         if not dead:
             return False
         now = time.time()
@@ -1307,7 +1306,7 @@ class Brain:
             return False
         time.sleep(0.4)
         fresh = self._grab_main()
-        again = vis.dead_mercs_v2(fresh, occ) if fresh is not None else []
+        again = vis.dead_mercs_v3(fresh) if fresh is not None else []
         dead = [d for d in dead if d in again]
         if not dead:
             return False
@@ -1327,12 +1326,12 @@ class Brain:
             pass
         self.hands.combo('alt', '1', wait=True)
         time.sleep(1.5)
-        left = vis.dead_mercs_v2(self._grab_main(), occ)
+        left = vis.dead_mercs_v3(self._grab_main())
         if left:
             self._log(f'[용병] Alt+1 후에도 사망 슬롯 {left} — Alt+2 한 번')
             self.hands.combo('alt', '2', wait=True)
             time.sleep(1.5)
-            left = vis.dead_mercs_v2(self._grab_main(), occ)
+            left = vis.dead_mercs_v3(self._grab_main())
         self._revive_fail = (getattr(self, '_revive_fail', 0) + 1) if left else 0
         self._log('[용병] 부활 후 남은 사망 슬롯: ' + (str(left) if left else '없음'))
         return True

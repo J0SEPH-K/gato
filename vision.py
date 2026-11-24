@@ -534,3 +534,41 @@ def dead_mercs_v2(img: np.ndarray, occupied=()) -> list:
         if slot < last_alive or slot in occupied:
             out.append(slot)
     return out
+
+# --- slot occupancy -------------------------------------------------------------------
+# Empty portrait panels are dark blue-grey placeholder art (mean ~33-70, almost no bright
+# pixels); a portrait - alive or dead - is bright grey art (>= ~245 px above 180 in the band,
+# dead ones desaturated).  The 150 threshold sits in the middle of a 69 -> 245 gap, so it does
+# not depend on the skin or on the HP colour.
+MERC_OCC_BRIGHT_MIN = 150
+
+
+def merc_occupied_slot(img: np.ndarray, y0: int) -> bool:
+    """True when the portrait slot holds art at all (alive or dead), False for an empty panel."""
+    band = img[max(0, y0 - 38):max(1, y0 - 2), 4:86]
+    g = cv2.cvtColor(band, cv2.COLOR_BGR2GRAY)
+    return int((g > 180).sum()) >= MERC_OCC_BRIGHT_MIN
+
+
+def merc_occupied(img: np.ndarray) -> list:
+    """1-based slots that currently show portrait art."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    return [i + 1 for i, y0 in enumerate(MERC_BAR_ROWS) if merc_occupied_slot(img, y0)]
+
+
+def dead_mercs_v3(img: np.ndarray) -> list:
+    """Dead unit = a slot that shows portrait art but neither an HP nor a mana gauge.
+
+    Empty panels are dark placeholder art and carry no portrait, so they are never reported -
+    the stale occupied list that used to flag them is gone. Units fill the column top-down,
+    so a gauge-less slot above the last live one is dead even if its portrait is blanked."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    alive = set(merc_alive_slots(img))
+    if not alive:
+        return []
+    last_alive = max(alive)
+    return [s for s in range(1, 13)
+            if s not in alive
+            and (s < last_alive or merc_occupied_slot(img, MERC_BAR_ROWS[s - 1]))]
