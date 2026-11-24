@@ -1800,6 +1800,7 @@ class Brain:
                                 _best = max(_sc.items(), key=lambda kv: kv[1])
                                 _s1 = vis._px_sum(_rf, 513, 43, 514, 44)
                                 _s2 = vis._px_sum(_rf, 514, 43, 515, 44)
+                                meta['reveal_conf'] = round(_best[1], 4)
                                 _scores = ', '.join(f'{k}:{v:.2f}' for k, v in sorted(_sc.items()))
                                 self._log(f'{p}조철 진단 reveal={meta["reveal_slot"]} best={_best[0]}:{_best[1]:.3f} popuppx={_s1}/{_s2} scores={_scores}')
                                 cv2.imwrite(os.path.join(config.JOCHUL_FAIL_DIR, time.strftime('diag_%H%M%S_reveal.png')), _rf)
@@ -1812,7 +1813,8 @@ class Brain:
                     # correct it right now instead of ending the round wrong (observed live: 5 of 6 rounds
                     # had reveal != answer and every one of them failed).
                     _rev = meta.get('reveal_slot')
-                    if _rev and _rev != answer:
+                    _rev_conf = float(meta.get('reveal_conf') or 0.0)
+                    if _rev and _rev != answer and _rev_conf >= jochul.MARKER_ABS:
                         try:
                             if _popup_present():
                                 x2 = jochul.CLICK_X[_rev]
@@ -1830,6 +1832,8 @@ class Brain:
                                 time.sleep(0.6)
                         except Exception as _e:
                             self._log(f'{p}조철 재클릭 실패 {_e!r}')
+                    elif _rev and _rev != answer:
+                        self._log(f'{p}조철 reveal={_rev} 신뢰도 {_rev_conf:.3f} < {jochul.MARKER_ABS} — 클릭 {answer} 유지')
                     try:
                         _p2 = cap()
                         if _p2 is not None:
