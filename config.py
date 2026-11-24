@@ -18,6 +18,30 @@ if getattr(__import__('sys'), 'frozen', False):
 else:
     BASE_DIR = RES_DIR
 SETTINGS_PATH = os.path.join(BASE_DIR, 'prism_settings.json')
+
+
+def _version_candidates():
+    # A file literally named VERSION next to the exe shadows the system
+    # C:\Windows\System32\version.dll on case-insensitive NTFS, so anything
+    # asking for VERSION.dll there gets a 7-byte text file instead of a PE image.
+    # Ship it under res/ instead.
+    return (os.path.join(RES_DIR, 'res', 'VERSION'),
+            os.path.join(RES_DIR, 'VERSION'),
+            os.path.join(BASE_DIR, 'VERSION'))
+
+
+def read_version() -> str:
+    """Best-effort app version; '' when nothing readable is found."""
+    for p in _version_candidates():
+        try:
+            with open(p, encoding='utf-8') as f:
+                v = f.read().strip()
+        except Exception:
+            continue
+        if v and v[0].isdigit():
+            return v
+    return ''
+
 MODEL_DIR = os.path.join(RES_DIR, 'assets', 'models', 'monster')
 PORTRAIT_DIR = os.path.join(RES_DIR, 'assets', 'imgs', 'monster')
 JOCHUL_MODEL = os.path.join(RES_DIR, 'assets', 'models', 'jochul', 'jochul.pt')

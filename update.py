@@ -30,11 +30,7 @@ MAX_BYTES = 900 * 1024 * 1024
 
 
 def current_version():
-    try:
-        with open(os.path.join(config.RES_DIR, 'VERSION'), encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception:
-        return ''
+    return config.read_version()
 
 
 def _tag_key(tag):

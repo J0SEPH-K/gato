@@ -32,6 +32,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; 1.0.20 shipped VERSION as version.dll beside the exe, which shadows the
+; system version.dll on case-insensitive NTFS. Drop it on upgrade.
+Type: files; Name: "{app}\version.dll"
+
 [Files]
 Source: "..\dist\Gato\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsVCRedist

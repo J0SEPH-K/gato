@@ -97,14 +97,9 @@ def _machine():
 def _ver():
     """The app version. VERSION ships next to the exe, but older installs predate that, so fall
     back to the version baked into the build: a '?' on every PC makes the hub useless."""
-    for path in (os.path.join(config.RES_DIR, 'VERSION'), os.path.join(config.BASE_DIR, 'VERSION')):
-        try:
-            with open(path, encoding='utf-8') as f:
-                v = f.read().strip()
-            if v:
-                return v
-        except Exception:
-            pass
+    v = config.read_version()
+    if v:
+        return v
     try:
         import net
         return str(net.CODE_VER or '') or '?'

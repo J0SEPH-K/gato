@@ -29,8 +29,7 @@ CLIENT_VER = '1.0'
 def _app_ver():
     try:
         import config as _config
-        with open(os.path.join(_config.RES_DIR, 'VERSION'), encoding='utf-8') as f:
-            return f.read().strip()
+        return _config.read_version() or CLIENT_VER
     except Exception:
         return CLIENT_VER
 
