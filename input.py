@@ -270,6 +270,7 @@ class Hands:
         return False
     def click(self, x, y, button='left', down_ms=0.08, wait=False):
         def _fn():
+            nonlocal down_ms
             hwnd = self._foreground()
             if not hwnd:
                 return False
