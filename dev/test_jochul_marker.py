@@ -63,8 +63,6 @@ def test_marker_lock_needs_a_burst():
     votes = []
     assert jochul.marker_lock(votes, 3) is None
     assert jochul.marker_lock(votes, None) is None
-    assert jochul.marker_lock(votes, 3) is None
-    assert jochul.marker_lock(votes, 3) is None
     assert jochul.marker_lock(votes, 3) == 3
 
 

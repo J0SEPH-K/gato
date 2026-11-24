@@ -743,6 +743,36 @@ class Brain:
             return False
         kind, pt = found
         if kind == 'unknown':
+            try:
+                import cv2 as _cv2
+                import numpy as _np
+                _t = vis._load_revive_mask()
+                _m = 'None' if _t is None else ('%s/%d' % (_t.shape, int(_t.sum())))
+                _best = (0.0, 0.0)
+                if _t is not None:
+                    _k3 = _np.ones((3, 3), _np.uint8)
+                    _k5 = _np.ones((5, 5), _np.uint8)
+                    _td = _cv2.dilate(_t, _k3)
+                    _x0, _y0, _x1, _y1 = vis.REVIVE_TEXT_BOX
+                    for _dy in (-2, -1, 0, 1, 2):
+                        for _dx in (-2, -1, 0, 1, 2):
+                            _reg = frame[_y0 + _dy:_y1 + _dy, _x0 + _dx:_x1 + _dx]
+                            if _reg.shape[:2] != _t.shape:
+                                continue
+                            _c = (_cv2.cvtColor(_reg, _cv2.COLOR_BGR2GRAY) > 140).astype(_np.uint8)
+                            _n = int(_c.sum())
+                            if _n == 0:
+                                continue
+                            _rc = float(_np.logical_and(_t, _cv2.dilate(_c, _k5)).sum()) / max(1, int(_t.sum()))
+                            _pc = float(_np.logical_and(_c, _td).sum()) / _n
+                            if min(_rc, _pc) > min(_best):
+                                _best = (_rc, _pc)
+                self._log('[팝업] 진단 cv2=%s np=%s shape=%s dtype=%s maskpath=%s exists=%s mask=%s warm=%.3f/%.3f/%.3f best=%.3f/%.3f min=%s' % (
+                    _cv2.__version__, _np.__version__, frame.shape, frame.dtype, vis._REVIVE_MASK_PATH, os.path.exists(vis._REVIVE_MASK_PATH),
+                    _m, vis._warm_fill(frame, vis.REVIVE_OK_BOX), vis._warm_fill(frame, vis.REVIVE_CANCEL_BOX),
+                    vis._warm_fill(frame, vis.REVIVE_GAP_BOX), _best[0], _best[1], vis.REVIVE_TEXT_MIN))
+            except Exception as _e:
+                self._log('[팝업] 진단 실패 %r' % (_e,))
             if time.time() - getattr(self, '_unk_dlg_at', 0.0) >= 60.0:
                 self._unk_dlg_at = time.time()
                 try:
@@ -1543,15 +1573,24 @@ class Brain:
             return
         else:
             self._log(f'{p}조철 감지 — 풀이 시작')
+            # NOTE: the park move is deliberately NOT awaited here. move_nofg(wait=True) costs a few
+            # hundred ms, which is enough to miss the start medallion burst entirely (it can be
+            # gone in 0.13 s). Fire it on a thread so the cursor still leaves the board before the
+            # shuffle, without delaying the first samples.
+            park_th = None
             if park:
-                hands.move_nofg(*jochul.PARK_XY, wait=True)
-            time.sleep(jochul.FIRST_TILE_DELAY)
-            # The first-tile marker can take a few frames to appear; look for up to ~1 s instead of
-            # giving up (and stopping) on the first miss. The shuffle clock below is kept aligned.
+                park_th = threading.Thread(target=lambda: hands.move_nofg(*jochul.PARK_XY, wait=True), daemon=True)
+                park_th.start()
+            # The start medallion only exists during the intro burst, and that burst can be over in
+            # ~0.1 s (one recorded round showed it on frames 0-5 of 44.6 fps and never again).
+            # Sleeping FIRST_TILE_DELAY first and then hunting inside a 1.6 s window made the loop
+            # start after the burst had already ended, so the reader fell back to a weak 1 vote.
+            # Sample from t=0 and keep sampling until the shuffle starts.
             _t_ref = time.time()
             frame, first = None, None
             _marker_seen, _pattern_seen = [], []
-            for _try in range(45):
+            _deadline = max(jochul.FIRST_TILE_DELAY, jochul.SHUFFLE_DELAY)
+            while time.time() - _t_ref < _deadline:
                 frame = cap()
                 if frame is not None:
                     _reg = jochul.crop_region(frame)
@@ -1560,9 +1599,7 @@ class Brain:
                     _locked = jochul.marker_lock(_marker_seen, jochul.find_marker_slot(_reg))
                     if _locked:
                         break
-                if time.time() - _t_ref > 1.6:
-                    break
-                time.sleep(0.04)
+                time.sleep(0.02)
             _mv, _pv = jochul.vote_marker(_marker_seen), jochul.vote_marker(_pattern_seen)
             first = _mv or _pv
             if _mv and _pv and _mv != _pv:

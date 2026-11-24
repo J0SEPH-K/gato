@@ -1,0 +1,4163 @@
+
+===== sprite_match.py (   21789 bytes) =====
+# Source Generated with Decompyle++
+# File: sprite_match.pyc (Python 3.11)
+
+import ctypes
+import ctypes.wintypes
+import glob
+import os
+import time
+import cv2
+import numpy as np
+from agf import AgfFile
+
+try:
+    ctypes.windll
+    ctypes.WinDLL
+except AttributeError:
+    class _StubDLL:
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+    class _StubLib:
+        def __getattr__(self, name):
+            return _StubDLL()
+    ctypes.windll = _StubLib()
+    ctypes.WinDLL = lambda *a, **k: _StubDLL()
+
+(FIELD_W, FIELD_H) = (1024, 651)
+MAX_MATCH_PX = 20000
+CASCADE_K = 6
+CASCADE_PREMIN = 1
+DEFAULT_GAME_DIR = 'C:\\AKInteractive\\Gersang'
+
+def find_game_dir():
+    
+    try:
+        import win32gui
+        import win32process
+        found = []
+        
+        def _exe(pid):
+            h = ctypes.windll.kernel32.OpenProcess(4096, False, pid)
+            if not h:
+                return ''
+            
+            try:
+                buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+                size = ctypes.wintypes.DWORD(ctypes.wintypes.MAX_PATH)
+                ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+                ctypes.windll.kernel32.CloseHandle(h)
+                return buf.value if ok else ''
+            except:
+                ctypes.windll.kernel32.CloseHandle(h)
+
+
+        
+        def _enum(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd) or win32gui.GetWindowTextLength(hwnd) == 0:   # decompile dropped the not
+                return None
+            (_, pid) = win32process.GetWindowThreadProcessId(hwnd)
+            p = _exe(pid)
+            if p.lower().endswith('\\gersang.exe'):
+                found.append(os.path.dirname(p))
+                return None
+
+        win32gui.EnumWindows(_enum, None)
+        if found:
+            return found[0]
+    except Exception:
+        pass
+
+    if os.path.isdir(DEFAULT_GAME_DIR):
+        return DEFAULT_GAME_DIR
+    return ''
+
+
+def resolve_agf_paths(names, game_dir = None):
+    game_dir = game_dir or find_game_dir()
+    if not game_dir:
+        raise FileNotFoundError('거상 설치 폴더를 찾을 수 없습니다 (게임 실행 필요)')
+    quick = [
+        os.path.join(game_dir, 'Assets', 'Textures', 'Characters'),
+        os.path.join(game_dir, 'Assets', 'Textures', 'Skills')]
+    paths = []
+    deep = None
+    for name in names:
+        stem = name.lower()
+        hit = ''
+        for d in quick:
+            for ext in ('.AGF', '.agf'):
+                p = os.path.join(d, name + ext)
+                if os.path.isfile(p):
+                    hit = p
+                    break
+            if hit:
+                break
+        if not hit:
+            if deep is None:
+                deep = { os.path.splitext(os.path.basename(p))[0].lower(): p for p in glob.glob(os.path.join(game_dir, '**', '*.agf'), recursive = True) }
+            hit = deep.get(stem, '')
+        if not hit:
+            raise FileNotFoundError(f'''AGF 없음: {name} (게임 폴더 {game_dir})''')
+        paths.append(hit)
+    return paths
+
+
+def _trim(s):
+    a = s[:, :, 3]
+    (ys, xs) = np.where(a > 0)
+    if len(xs) == 0:
+        return s
+    return s[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+
+
+def _enc(b, g, r):
+    return b.astype(np.uint32) | g.astype(np.uint32) << 8 | r.astype(np.uint32) << 16
+
+
+def _bg_color_counts(bg_dir, log):
+    counts = { }
+    files = sorted(glob.glob(os.path.join(bg_dir, '*.png'))) if bg_dir else []
+    for p in files:
+        im = cv2.imread(p)
+        if im is None:
+            continue
+        if im.shape[:2] == (768, 1024):
+            im = im[:FIELD_H]
+        e = _enc(im[:, :, 0], im[:, :, 1], im[:, :, 2]).ravel()
+        (u, c) = np.unique(e, return_counts = True)
+        for k, v in zip(u.tolist(), c.tolist()):
+            counts[k] = counts.get(k, 0) + v
+    if files:
+        log(f'''[*] 배경 코퍼스 {len(files)}장, 고유색 {len(counts)}개''')
+    return counts
+
+
+class SpriteMatcher:
+    
+    def __init__(self, agf_paths, bg_dir=None, mirror=True, n_anchors=3, n_probes=28,
+                 probe_tol=3, accept=0.6, min_bits=55.0, min_frac=0.3,
+                 skip_frames=None, bg_counts=None, log=print):
+        self.probe_tol = int(probe_tol)
+        self.accept = float(accept)
+        self.min_bits = float(min_bits)
+        self.min_frac = float(min_frac)
+        self.log = log
+        t0 = time.time()
+        if bg_counts is None:
+            bg_counts = _bg_color_counts(bg_dir, log) if bg_dir else { }
+        self._bg_total = max(1, sum(bg_counts.values()))
+        self._bgq = np.zeros((32, 32, 32), np.float64)
+        if bg_counts:
+            ks = np.fromiter(bg_counts.keys(), np.int64, len(bg_counts))
+            vs = np.fromiter(bg_counts.values(), np.float64, len(bg_counts))
+            np.add.at(self._bgq, ((ks & 255) >> 3, (ks >> 8 & 255) >> 3, (ks >> 16 & 255) >> 3), vs)
+        skip_frames = skip_frames or set()
+        tpl = []
+        for path in agf_paths:
+            stem = os.path.splitext(os.path.basename(path))[0]
+            a = AgfFile(path)
+            for i in range(a.nframes):
+                if (stem, i) in skip_frames:
+                    continue
+                s = _trim(a.frame(i))
+                variants = [
+                    (s, f'''{stem}:{i}''')]
+                if mirror:
+                    variants.append((s[:, ::-1].copy(), f'''{stem}:{i}M'''))
+                for im, tag in variants:
+                    t = self._build_one(im, tag, bg_counts, n_anchors, n_probes)
+                    if t is not None:
+                        tpl.append(t)
+        if not tpl:
+            raise ValueError('유효한 템플릿이 없습니다')
+        self.tpl = tpl
+        self.w = np.array([ t['w'] for t in tpl ], np.int32)
+        self.h = np.array([ t['h'] for t in tpl ], np.int32)
+        (colors, items) = ([], [])
+        for ti, t in enumerate(tpl):
+            seen = set()
+            for c, ax, ay in t['anchors']:
+                (b, g, r) = (c & 255, c >> 8 & 255, c >> 16 & 255)
+                for d in (0, -1, 1):
+                    c2 = min(255, max(0, b + d)) | min(255, max(0, g + d)) << 8 | min(255, max(0, r + d)) << 16
+                    if (c2, ax, ay) in seen:
+                        continue
+                    seen.add((c2, ax, ay))
+                    colors.append(c2)
+                    items.append((ti, ax, ay))
+        colors = np.array(colors, np.uint32)
+        items = np.array(items, np.int32)
+        order = np.argsort(colors, kind = 'stable')
+        (colors, items) = (colors[order], items[order])
+        (uniq, start) = np.unique(colors, return_index = True)
+        self.a_colors = uniq
+        self.a_start = np.append(start, len(colors)).astype(np.int64)
+        self.a_t = np.ascontiguousarray(items[:, 0])
+        self.a_ax = np.ascontiguousarray(items[:, 1])
+        self.a_ay = np.ascontiguousarray(items[:, 2])
+        self.lutR = np.zeros(256, bool)
+        self.lutR[uniq >> 16 & 255] = True
+        log(f'''[*] 매처 빌드 {time.time() - t0:.1f}s — 템플릿 {len(tpl)}개, 앵커색 {len(uniq)}개, R-LUT 밀도 {self.lutR.mean() * 100:.0f}%''')
+        return None
+
+    
+    def _cube_counts(self, b, g, r):
+        t = self.probe_tol
+        lo = [ np.clip(v - t, 0, 255).astype(np.int64) >> 3 for v in (b, g, r) ]
+        hi = [ np.clip(v + t, 0, 255).astype(np.int64) >> 3 for v in (b, g, r) ]
+        tot = np.zeros(len(lo[0]), np.float64)
+        for ib in (0, 1):
+            bb = hi[0] if ib else lo[0]
+            mb = (ib == 0) | (hi[0] != lo[0])
+            for ig in (0, 1):
+                gg = hi[1] if ig else lo[1]
+                mg = mb & ((ig == 0) | (hi[1] != lo[1]))
+                for ir in (0, 1):
+                    rr = hi[2] if ir else lo[2]
+                    m = mg & ((ir == 0) | (hi[2] != lo[2]))
+                    tot[m] += self._bgq[bb[m], gg[m], rr[m]]
+        return tot
+
+    
+    def _build_one(self, s, tag, bg_counts, n_anchors, n_probes):
+        (h, w) = s.shape[:2]
+        if h < 25 or w < 20:
+            return None
+        interior = cv2.erode((s[:, :, 3] > 200).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        (ys, xs) = np.nonzero(interior)
+        if len(xs) < 150:
+            return None
+        b, g, r = (s[ys, xs, 0].astype(np.int32), s[ys, xs, 1].astype(np.int32), s[ys, xs, 2].astype(np.int32))
+        colors = _enc(s[ys, xs, 0], s[ys, xs, 1], s[ys, xs, 2])
+        val = np.maximum(np.maximum(b, g), r)
+        sat = (val - np.minimum(np.minimum(b, g), r)).astype(np.float64)
+        distinct = (val >= 60) & (sat >= 25)
+        if int(distinct.sum()) < 10:
+            return None
+        bgc = self._cube_counts(b, g, r)
+        score = np.log2(bgc + 1.0) * 512.0 - sat
+        min_d = max(6.0, (w * w + h * h) ** 0.5 / 4)
+        anchors = []
+        order = np.argsort(score)
+        order = order[distinct[order]]
+        top = ys < h * 0.4
+        top_order = order[top[order]]
+        if len(top_order):
+            j = top_order[0]
+            anchors.append((int(colors[j]), int(xs[j]), int(ys[j])))
+        for j in order:
+            if len(anchors) >= n_anchors:
+                break
+            if all(((xs[j] - ax) ** 2 + (ys[j] - ay) ** 2 >= min_d * min_d for _c, ax, ay in anchors)):
+                anchors.append((int(colors[j]), int(xs[j]), int(ys[j])))
+        if not anchors:
+            return None
+        di = np.nonzero(distinct)[0]
+        n_d = min(n_probes // 2, len(di))
+        sel_d = di[np.linspace(0, len(di) - 1, n_d).astype(np.int64)]
+        sel_u = np.linspace(0, len(xs) - 1, min(n_probes - n_d, len(xs))).astype(np.int64)
+        sel = np.unique(np.concatenate([
+            sel_d,
+            sel_u]))
+        py, px = (ys[sel], xs[sel])
+        p = (self._cube_counts(b[sel], g[sel], r[sel]) + 1.0) / self._bg_total
+        wgt = np.clip(-np.log2(p), 1.0, 14.0).astype(np.float32)
+        return {
+            'w': w,
+            'h': h,
+            'tag': tag,
+            'anchors': anchors,
+            'px': px.astype(np.int32),
+            'py': py.astype(np.int32),
+            'pcol': s[py, px, :3].astype(np.int16),
+            'wgt': wgt }
+
+    
+    def detect(self, frame_bgr, timings = None):
+        pk = self._ensure_torch()
+        if pk is not False:
+            
+            try:
+                return self._detect_torch(frame_bgr, pk, timings)
+            except Exception as e:
+                self._torchpk = False
+                self.log(f'''[매처] torch detect 실패 → numpy 폴백: {e!r}''')
+            except:
+                raise
+                raise
+
+        return self._detect_numpy(frame_bgr, timings)
+
+    
+    def _detect_numpy(self, frame_bgr, timings = None):
+        f = frame_bgr[:FIELD_H, :FIELD_W]
+        t0 = time.perf_counter()
+        m = self.lutR[f[:, :, 2]]
+        (ys, xs) = np.nonzero(m)
+        if len(xs):
+            enc = _enc(f[ys, xs, 0], f[ys, xs, 1], f[ys, xs, 2])
+            idx = np.searchsorted(self.a_colors, enc)
+            idx_c = np.minimum(idx, len(self.a_colors) - 1)
+            ok = self.a_colors[idx_c] == enc
+            ys, xs, cid = (ys[ok], xs[ok], idx_c[ok])
+            if len(xs) > MAX_MATCH_PX:
+                sub = np.linspace(0, len(xs) - 1, MAX_MATCH_PX).astype(np.int64)
+                ys, xs, cid = (ys[sub], xs[sub], cid[sub])
+        else:
+            cid = np.empty(0, np.int64)
+        t1 = time.perf_counter()
+        if len(cid):
+            cnt = (self.a_start[cid + 1] - self.a_start[cid]).astype(np.int64)
+            tot = int(cnt.sum())
+            first = self.a_start[cid]
+            cum = np.cumsum(cnt)
+            item = np.repeat(first, cnt) + (np.arange(tot) - np.repeat(cum - cnt, cnt))
+            ti = self.a_t[item]
+            ox = np.repeat(xs, cnt) - self.a_ax[item]
+            oy = np.repeat(ys, cnt) - self.a_ay[item]
+            inb = (ox >= 0) & (oy >= 0) & (ox + self.w[ti] <= FIELD_W) & (oy + self.h[ti] <= FIELD_H)
+            ti, ox, oy = (ti[inb], ox[inb], oy[inb])
+            key = ti.astype(np.int64) * (FIELD_W * FIELD_H) + oy.astype(np.int64) * FIELD_W + ox
+            (_, ui) = np.unique(key, return_index = True)
+            ti, ox, oy = (ti[ui], ox[ui], oy[ui])
+        else:
+            ti = np.empty(0, np.int32)
+            ox = oy = np.empty(0, np.int64)
+        t2 = time.perf_counter()
+        raw = []
+        fi16 = f.astype(np.int16)
+        order = np.argsort(ti, kind = 'stable')
+        ti, ox, oy = (ti[order], ox[order], oy[order])
+        bounds = np.searchsorted(ti, np.arange(len(self.tpl) + 1))
+        for t in np.unique(ti):
+            (s0, s1) = (bounds[t], bounds[t + 1])
+            tp = self.tpl[t]
+            (oxs, oys) = (ox[s0:s1], oy[s0:s1])
+            if len(tp['wgt']) > CASCADE_K:
+                topk = np.argsort(-tp['wgt'])[:CASCADE_K]
+                Yp = oys[:, None] + tp['py'][topk][None, :]
+                Xp = oxs[:, None] + tp['px'][topk][None, :]
+                hp = (np.abs(fi16[Yp, Xp] - tp['pcol'][topk][None, :, :]).max(2) <= self.probe_tol).sum(1)
+                keep = hp >= CASCADE_PREMIN
+                if not keep.any():
+                    continue
+                (oxs, oys) = (oxs[keep], oys[keep])
+            Y = oys[:, None] + tp['py'][None, :]
+            X = oxs[:, None] + tp['px'][None, :]
+            d = np.abs(fi16[Y, X] - tp['pcol'][None, :, :]).max(axis = 2)
+            hit = d <= self.probe_tol
+            frac = hit.mean(axis = 1)
+            bits = (hit * tp['wgt'][None, :]).sum(axis = 1)
+            sc = np.maximum(frac, np.minimum(bits / (self.min_bits * 1.5), 1.0))
+            low = tp['py'] >= tp['h'] * 0.55
+            n_low = max(1, int(low.sum()))
+
+            frac_low = (hit & low[None, :]).sum(axis = 1) / n_low
+            for j in np.nonzero((frac >= self.accept) | (bits >= self.min_bits) & (frac >= self.min_frac))[0]:
+                raw.append((float(sc[j]), int(oxs[j]), int(oys[j]), tp['w'], tp['h'], tp['tag'], float(frac_low[j])))
+        t3 = time.perf_counter()
+        raw.sort(reverse = True)
+        out = []
+        for sc, x, y, w, h, tag, lowf in raw:
+            (cx, cy) = (x + w / 2, y + h / 2)
+            if all(((cx - (kx + kw / 2)) ** 2 + (cy - (ky + kh / 2)) ** 2 > 144 for kx, ky, kw, kh, _s, _t, _lf in out)):
+                out.append((x, y, w, h, sc, tag, lowf))
+        if timings is not None:
+            timings.update(prefilter = (t1 - t0) * 1000.0, expand = (t2 - t1) * 1000.0, verify = (t3 - t2) * 1000.0, total = (time.perf_counter() - t0) * 1000.0, cands = len(ti))
+        return out
+
+    
+    def _ensure_torch(self):
+        st = getattr(self, '_torchpk', 'untried')
+        if st != 'untried':
+            return st
+        
+        try:
+            import torch
+            dev = 'cpu'
+            
+            A = lambda a, dt: torch.as_tensor(np.asarray(a, dt), device = dev)
+
+            T = len(self.tpl)
+            P = max((len(t['px']) for t in self.tpl))
+            py = np.zeros((T, P), np.int64)
+            px = np.zeros((T, P), np.int64)
+            pcol = np.zeros((T, P, 3), np.int16)
+            wgt = np.zeros((T, P), np.float32)
+            low = np.zeros((T, P), bool)
+            valid = np.zeros((T, P), bool)
+            nprobe = np.zeros(T, np.float32)
+            nlow = np.zeros(T, np.float32)
+            tk_py = np.zeros((T, CASCADE_K), np.int64)
+            tk_px = np.zeros((T, CASCADE_K), np.int64)
+            tk_pcol = np.zeros((T, CASCADE_K, 3), np.int16)
+            for i, t in enumerate(self.tpl):
+                n = len(t['px'])
+                nprobe[i] = n
+                py[i, :n] = t['py']
+                px[i, :n] = t['px']
+                pcol[i, :n] = t['pcol']
+                wgt[i, :n] = t['wgt']
+                valid[i, :n] = True
+                lw = t['py'] >= t['h'] * 0.55
+                low[i, :n] = lw
+                nlow[i] = max(1, int(lw.sum()))
+                top = np.argsort(-t['wgt'])[:CASCADE_K]
+                kk = len(top)
+                tk_py[i, :kk] = t['py'][top]
+                tk_px[i, :kk] = t['px'][top]
+                tk_pcol[i, :kk] = t['pcol'][top]
+            pk = {
+                'dev': dev,
+                'a_colors': A(self.a_colors, np.int64),
+                'a_start': A(self.a_start, np.int64),
+                'a_t': A(self.a_t, np.int64),
+                'a_ax': A(self.a_ax, np.int64),
+                'a_ay': A(self.a_ay, np.int64),
+                'lutR': torch.as_tensor(self.lutR, device = dev),
+                'w': A(self.w, np.int64),
+                'h': A(self.h, np.int64),
+                'py': A(py, np.int64),
+                'px': A(px, np.int64),
+                'pcol': A(pcol, np.int16),
+                'wgt': A(wgt, np.float32),
+                'low': torch.as_tensor(low, device = dev),
+                'valid': torch.as_tensor(valid, device = dev),
+                'nprobe': A(nprobe, np.float32),
+                'nlow': A(nlow, np.float32),
+                **{
+                    'tk_py': A(tk_py, np.int64),
+                    'tk_px': A(tk_px, np.int64),
+                    'tk_pcol': A(tk_pcol, np.int16),
+                    'tw': np.array([ t['w'] for t in self.tpl ]),
+                    'th': np.array([ t['h'] for t in self.tpl ]),
+                    'tags': [ t['tag'] for t in self.tpl ] } }
+            self._torchpk = pk
+            self.log(f'''[매처] torch(CPU) 가속 경로 활성 — 템플릿 {T}''')
+            return pk
+        except Exception as e:
+            self._torchpk = False
+            self.log(f'''[매처] torch 경로 비활성, numpy 사용: {e!r}''')
+            return False
+
+
+    
+    def _detect_torch(self, frame_bgr, pk, timings = None):
+        import torch
+        dev = pk['dev']
+        tol = self.probe_tol
+        accept = self.accept
+        min_bits = self.min_bits
+        min_frac = self.min_frac
+        t0 = time.perf_counter()
+        f = torch.as_tensor(frame_bgr[:FIELD_H, :FIELD_W], device = dev).to(torch.int64)
+        mask = pk['lutR'][f[:, :, 2]]
+        pts = mask.nonzero(as_tuple = False)
+        if pts.numel() == 0:
+            return []
+        (ys, xs) = (pts[:, 0], pts[:, 1])
+        enc = f[ys, xs, 0] | f[ys, xs, 1] << 8 | f[ys, xs, 2] << 16
+        idx = torch.clamp(torch.searchsorted(pk['a_colors'], enc), max = pk['a_colors'].numel() - 1)
+        ok = pk['a_colors'][idx] == enc
+        (ys, xs, cid) = (ys[ok], xs[ok], idx[ok])
+        if cid.numel() > MAX_MATCH_PX:
+            sub = torch.linspace(0, cid.numel() - 1, MAX_MATCH_PX, device = dev).long()
+            (ys, xs, cid) = (ys[sub], xs[sub], cid[sub])
+        if cid.numel() == 0:
+            return []
+        cnt = pk['a_start'][cid + 1] - pk['a_start'][cid]
+        tot = int(cnt.sum())
+        if tot == 0:
+            return []
+        first = pk['a_start'][cid]
+        cum = torch.cumsum(cnt, 0)
+        item = torch.repeat_interleave(first, cnt) + (torch.arange(tot, device = dev) - torch.repeat_interleave(cum - cnt, cnt))
+        ti = pk['a_t'][item]
+        ox = torch.repeat_interleave(xs, cnt) - pk['a_ax'][item]
+        oy = torch.repeat_interleave(ys, cnt) - pk['a_ay'][item]
+        inb = (ox >= 0) & (oy >= 0) & (ox + pk['w'][ti] <= FIELD_W) & (oy + pk['h'][ti] <= FIELD_H)
+        (ti, ox, oy) = (ti[inb], ox[inb], oy[inb])
+        if ti.numel() == 0:
+            return []
+        key = torch.unique(ti * (FIELD_W * FIELD_H) + oy * FIELD_W + ox)
+        ti = key // (FIELD_W * FIELD_H)
+        rem = key - ti * (FIELD_W * FIELD_H)
+        oy = rem // FIELD_W
+        ox = rem - oy * FIELD_W
+        fi16 = f.to(torch.int16)
+        ncand = int(ti.numel())
+        raw = []
+        CHUNK = 16384
+        for s in range(0, ncand, CHUNK):
+            tic = ti[s:s + CHUNK]
+            oxc = ox[s:s + CHUNK]
+            oyc = oy[s:s + CHUNK]
+            Yp = oyc[:, None] + pk['tk_py'][tic]
+            Xp = oxc[:, None] + pk['tk_px'][tic]
+            hp = ((fi16[Yp, Xp] - pk['tk_pcol'][tic]).abs().amax(dim = 2) <= tol).sum(1)
+            kp = hp >= CASCADE_PREMIN
+            if not bool(kp.any()):
+                continue
+            (tic, oxc, oyc) = (tic[kp], oxc[kp], oyc[kp])
+            Y = oyc[:, None] + pk['py'][tic]
+            X = oxc[:, None] + pk['px'][tic]
+            g = fi16[Y, X]
+            dd = (g - pk['pcol'][tic]).abs().amax(dim = 2)
+            hit = (dd <= tol) & pk['valid'][tic]
+            hf = hit.float()
+            frac = hf.sum(1) / pk['nprobe'][tic]
+            bits = (hf * pk['wgt'][tic]).sum(1)
+            sc = torch.maximum(frac, torch.clamp(bits / (min_bits * 1.5), max = 1.0))
+            frac_low = (hit & pk['low'][tic]).sum(1).float() / pk['nlow'][tic]
+            keep = (frac >= accept) | (bits >= min_bits) & (frac >= min_frac)
+            kj = keep.nonzero(as_tuple = False).flatten()
+            if kj.numel():
+                scj = sc[kj].tolist()
+                flj = frac_low[kj].tolist()
+                tij = tic[kj].tolist()
+                oxj = oxc[kj].tolist()
+                oyj = oyc[kj].tolist()
+                (tw, th, tags) = (pk['tw'], pk['th'], pk['tags'])
+                for a in range(len(scj)):
+                    t = tij[a]
+                    raw.append((scj[a], oxj[a], oyj[a], int(tw[t]), int(th[t]), tags[t], flj[a]))
+        raw.sort(reverse = True)
+        out = []
+        for sc, x, y, w, h, tag, lowf in raw:
+            (cx, cy) = (x + w / 2, y + h / 2)
+            if all(((cx - (kx + kw / 2)) ** 2 + (cy - (ky + kh / 2)) ** 2 > 144 for kx, ky, kw, kh, _s, _t, _lf in out)):
+                out.append((x, y, w, h, sc, tag, lowf))
+        if timings is not None:
+            timings.update(total = (time.perf_counter() - t0) * 1000.0, cands = ncand)
+        return out
+
+
+
+===== vision.py (   19724 bytes) =====
+# Source Generated with Decompyle++
+# File: vision.pyc (Python 3.11)
+
+from __future__ import annotations
+import os
+import threading
+import time
+from dataclasses import dataclass, field
+import cv2
+import numpy as np
+SCENE_POINTS = {
+    'main': [
+        (807, 676, (93, 45, 24))],
+    'battle': [
+        # vendor value. 77698a7 had put the MAIN screen's pixel here (73, 60, 44), so a
+        # main frame matched both scenes; not yet re-measured in a real battle.
+        (982, 722, (170, 54, 33))] }
+SCENE_LABELS = {
+    'main': '메인화면',
+    'battle': '전투화면',
+    'unknown': '알 수 없음' }
+PIXEL_TOL = 10   # vendor value; live main pixel (99,42,25) is within it on every channel
+# Exact pixel-sum signatures of popup text, as shipped by the vendor. 1530 = two pure-white
+# pixels (255*3*2). 77698a7 replaced these with sums measured on the NORMAL screen and a
+# +-60 tolerance, which made every trigger fire on an ordinary town frame; restored 2026-11-17.
+TRIGGERS = {
+    '사망': [
+        (454, 344, 456, 345, 1530),
+        (506, 353, 508, 354, 1530),
+        (441, 368, 443, 369, 1530)],
+    '포만감 템 없음': [
+        (573, 426, 574, 427, 690),
+        (574, 426, 575, 427, 690)],
+    '팅(시스템 팝업)': [
+        (589, 426, 590, 427, 690),
+        (590, 426, 591, 427, 690)],
+    '친구 요청': [
+        (388, 346, 390, 347, 1530),
+        (401, 336, 403, 337, 1530),
+        (414, 338, 416, 340, 3060)],
+    '지도 열림': [
+        (879, 608, 880, 609, 750),
+        (880, 608, 881, 609, 750)],
+    '무게 꽉 참': [
+        (389, 360, 391, 361, 1530),
+        (543, 365, 545, 366, 1530),
+        (387, 382, 389, 383, 1530)],
+    # B모드 / T밴: the vendor regions (846,719) and (941,719) are white text on THIS client in the
+    # normal 평화모드 / 거래허용 state too, so the bot would press A / X every 2 s and switch the
+    # modes ON. Re-measured 2026-11-18 in both states (A and X toggled, then restored):
+    # 전투모드 (849,716)+(850,716) = 1500 on / 6 off; 거래차단 (947,714)+(948,714) = 1500 on / 233 off.
+    'B모드': [
+        (849, 716, 851, 717, 1500)],
+    'T밴(거래차단)': [
+        (947, 714, 949, 715, 1500)],
+    'restart 팝업': [
+        (465, 420, 466, 421, 690),
+        (466, 420, 467, 421, 690)],
+    '조철 출현': [
+        (513, 43, 514, 44, 151),
+        (514, 43, 515, 44, 133),
+        (515, 43, 516, 44, 180)],
+    '자방문 출현': [
+        (449, 484, 450, 485, 690),
+        (450, 484, 451, 485, 690)] }
+CHAT_HANGUL_XY = (43, 739)
+WHISPER_FEATS = ((300, 117), (300, 294), (192, 230))
+WHISPER_FEAT_SUMS = (460, 462, 463)
+WHISPER_FEAT_TOL = 6
+IMPLAUSIBLE_TRIGGER_COUNT = 4  # see check_triggers() -- this many at once means noise, not real popups
+
+# Idle-kick warning dialog: '5분 뒤 캐릭터 선택 화면으로 이동됩니다' + single 확인
+# button. This is the REAL mechanism behind "game auto-returns to login
+# screen when idle" -- confirmed live 2026-11-19. It is a screen-centered
+# modal (not camera/anchor-relative like the 2nd-password panel), always
+# the same box, with exactly one button and no other interactive element,
+# so detecting and clicking it is much safer than the old movement-based
+# AFK nudge (which could land on map hotspots and open paid-action menus).
+_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'dialog_templates')
+_IDLE_WARNING_TEMPLATE_PATH = os.path.join(_ASSET_DIR, 'idle_warning.png')
+_idle_warning_template = None
+IDLE_WARNING_MATCH_THRESHOLD = 0.88
+# button center, measured relative to the template's own top-left corner
+IDLE_WARNING_CONFIRM_OFFSET = (250, 107)
+
+
+def _load_idle_warning_template():
+    global _idle_warning_template
+    if _idle_warning_template is None and os.path.exists(_IDLE_WARNING_TEMPLATE_PATH):
+        _idle_warning_template = cv2.imread(_IDLE_WARNING_TEMPLATE_PATH)
+    return _idle_warning_template
+
+
+def find_idle_warning(img: np.ndarray):
+    """Returns (x, y) screen coords of the 확인 button if the idle-kick
+    warning dialog is visible in img, else None. Pure template matching,
+    no AI/model calls."""
+    tpl = _load_idle_warning_template()
+    if tpl is None or img is None:
+        return None
+    res = cv2.matchTemplate(img, tpl, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+    if max_val < IDLE_WARNING_MATCH_THRESHOLD:
+        return None
+    bx, by = IDLE_WARNING_CONFIRM_OFFSET
+    return (max_loc[0] + bx, max_loc[1] + by)
+
+def _px_sum(img: np.ndarray, x0, y0, x1, y1) -> int:
+    (h, w) = img.shape[:2]
+    if x1 > w or y1 > h:
+        return -1
+    return int(img[y0:y1, x0:x1].sum())
+
+
+def _point_match(img: np.ndarray, x, y, rgb, tol=PIXEL_TOL) -> bool:
+    (h, w) = img.shape[:2]
+    if not (0 <= x < w and 0 <= y < h):
+        return False
+    (b, g, r) = img[y, x]
+    (er, eg, eb) = rgb
+    # decompile dropped the red channel
+    return abs(int(r) - er) <= tol and abs(int(g) - eg) <= tol and abs(int(b) - eb) <= tol
+
+
+def is_scene(img: np.ndarray, name: str) -> bool:
+    points = SCENE_POINTS.get(name)
+    if img is None or not points:
+        return False
+    return all((_point_match(img, x, y, rgb) for x, y, rgb in points))
+
+
+def detect_scene(img: np.ndarray) -> str:
+    for name in SCENE_POINTS:
+        if is_scene(img, name):
+            return name
+    return 'unknown'
+
+
+def scene_probe(name: str):
+    return SCENE_POINTS[name][0]
+
+
+def px_is(px_bgr, rgb, tol: int = PIXEL_TOL) -> bool:
+    # decompile turned this into `while not g-ok: return b-ok` (None whenever green matched),
+    # and prism.py:611 calls it without tol
+    (b, g, r) = (int(v) for v in px_bgr[:3])
+    (er, eg, eb) = rgb
+    return abs(r - er) <= tol and abs(g - eg) <= tol and abs(b - eb) <= tol
+
+
+def check_triggers(img: np.ndarray) -> set[str]:
+    fired = set()
+    for name, regions in TRIGGERS.items():
+        if all(_px_sum(img, x0, y0, x1, y1) == s for x0, y0, x1, y1, s in regions):
+            fired.add(name)
+    if len(fired) >= IMPLAUSIBLE_TRIGGER_COUNT:
+        # Real triggers almost never co-occur more than 1-2 at a time. Seeing
+        # this many at once (observed live 2026-11-18 during a Christmas-event
+        # background: 5 fired simultaneously on an ordinary idle screen) means
+        # seasonal/event background art is coincidentally matching the exact
+        # pixel-sum signatures below, not that 5 real popups are all open.
+        # Distrust the whole frame rather than act on noise -- this is what
+        # was silently blocking the anti-AFK nudge and risked spamming wrong
+        # key reactions (revive / eat / close-map) on a perfectly normal screen.
+        return set()
+    return fired
+
+
+def chat_hangul_state(img: np.ndarray) -> str:
+    (x, y) = CHAT_HANGUL_XY
+    s = _px_sum(img, x, y, x + 1, y + 1)
+    return {
+        496: 'korean',
+        0: 'english' }.get(s, 'inactive')
+
+
+def whisper_is_open(img: np.ndarray) -> bool:
+    return all(abs(_px_sum(img, x, y, x + 1, y + 1) - e) <= WHISPER_FEAT_TOL for (x, y), e in zip(WHISPER_FEATS, WHISPER_FEAT_SUMS))
+
+SCENE_SIM_THRESH = 0.5
+FIELD_H = 651
+
+def scene_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    ha = cv2.calcHist([
+        cv2.cvtColor(a, cv2.COLOR_BGR2HSV)], [
+        0,
+        1], None, [
+        32,
+        32], [
+        0,
+        180,
+        0,
+        256])
+    hb = cv2.calcHist([
+        cv2.cvtColor(b, cv2.COLOR_BGR2HSV)], [
+        0,
+        1], None, [
+        32,
+        32], [
+        0,
+        180,
+        0,
+        256])
+    cv2.normalize(ha, ha)
+    cv2.normalize(hb, hb)
+    return float(cv2.compareHist(ha, hb, cv2.HISTCMP_CORREL))
+
+
+def gm_chat_visible(img: np.ndarray) -> bool:
+    a = img[:FIELD_H]
+    tl, tr = (a[:-1, :-1], a[:-1, 1:])
+    bl, br = (a[1:, :-1], a[1:, 1:])
+    mask = (tl == 210).all(2) & (tr == 210).all(2) & (bl == 10).all(2) & (br == 10).all(2)
+    return bool(mask.any())
+
+@dataclass
+class VisionState:
+    scene: str = 'unknown'
+    triggers: set = field(default_factory=set)
+    chat: str = 'inactive'
+    whisper: bool = False
+
+
+
+class Vision:
+    
+    def __init__(self, max_events: int = 500):
+        self._lock = threading.Lock()
+        self.state = VisionState()
+        self._events = []
+        self._seq = 0
+        self._max = max_events
+
+    
+    def attach(self, engine) -> None:
+        engine.subscribe(self._on_frame)
+
+    
+    def _emit(self, kind: str, text: str) -> None:
+        self._seq += 1
+        self._events.append({
+            'seq': self._seq,
+            'kind': kind,
+            'text': text,
+            'time': time.strftime('%H:%M:%S') })
+        if len(self._events) > self._max:
+            del self._events[:len(self._events) - self._max]
+        self._debug_log(kind, text)
+
+
+    def _debug_log(self, kind: str, text: str) -> None:
+        # Independent debug channel on top of the normal event buffer, which
+        # only the live UI panel can read. This writes straight to a plain
+        # file so the Windows PC's state is inspectable without a UI session
+        # attached -- added 2026-11-18, lost once already when a vision.py
+        # push from a stale local copy silently dropped it; keep this in the
+        # repo, not just pushed ad hoc, so it survives future pushes.
+        try:
+            path = os.path.join(__import__('config').BASE_DIR, 'gato_debug.log')
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(f"{time.strftime('%H:%M:%S')} [{kind}] {text}\n")
+        except Exception:
+            pass
+
+    
+    def reset(self) -> None:
+        with self._lock:
+            self.state = VisionState()
+
+    
+    def note(self, kind: str, text: str) -> None:
+        with self._lock:
+            self._emit(kind, text)
+
+    
+    def events_since(self, seq: int) -> list[dict]:
+        with self._lock:
+            return [ e for e in self._events if e['seq'] > seq ]
+
+    
+    def snapshot(self) -> dict:
+        with self._lock:
+            st = self.state
+            return {
+                'scene': st.scene,
+                'scene_label': SCENE_LABELS.get(st.scene, st.scene),
+                'triggers': sorted(st.triggers),
+                'chat': st.chat,
+                'whisper': st.whisper,
+                'seq': self._seq }
+
+    
+    def _on_frame(self, img: np.ndarray, frame_id: int) -> None:
+        scene = detect_scene(img)
+        fired = check_triggers(img)
+        chat = chat_hangul_state(img)
+        whisper = whisper_is_open(img)
+        with self._lock:
+            st = self.state
+            if scene != st.scene:
+                self._emit('scene', f'''화면 전환: {SCENE_LABELS.get(scene, scene)}''')
+            for name in sorted(fired - st.triggers):
+                self._emit('trigger', f'''감지: {name}''')
+            for name in sorted(st.triggers - fired):
+                self._emit('clear', f'''해제: {name}''')
+            if whisper != st.whisper:
+                self._emit('whisper', '귓말창 열림' if whisper else '귓말창 닫힘')
+            (st.scene, st.triggers, st.chat, st.whisper) = (scene, fired, chat, whisper)
+
+
+
+
+# ---- 불사신부 사용 확인 팝업 (용병/캐릭터 사망 시) -------------------------------------
+# '불사신부 사용시 의원으로 가지 않고 그 자리에서 부활할 수 있습니다. 사용하시겠습니까?' + 확인/취소.
+# Geometry measured 2026-11-19 from a client screenshot (1024x768 reference). Several other
+# dialogs (e.g. paid travel) share the same two-button layout, so the BUTTONS alone are never
+# enough to click: the message text must also match the stored text mask.
+REVIVE_OK_BOX = (532, 434, 586, 449)
+REVIVE_CANCEL_BOX = (604, 434, 658, 449)
+REVIVE_GAP_BOX = (588, 434, 602, 449)
+REVIVE_CLICK_XY = (558, 441)
+REVIVE_TEXT_BOX = (380, 340, 640, 392)
+REVIVE_TEXT_MIN = 0.6
+_REVIVE_MASK_PATH = os.path.join(_ASSET_DIR, 'revive_text_mask.png')
+_revive_mask = None
+
+
+def _warm_fill(img: np.ndarray, box) -> float:
+    x0, y0, x1, y1 = box
+    reg = img[y0:y1, x0:x1].astype(np.int16)
+    if reg.size == 0:
+        return 0.0
+    b, g, r = reg[..., 0], reg[..., 1], reg[..., 2]
+    m = (r > 120) & (r < 190) & (g > 110) & (g < 170) & (b > 95) & (b < 150) & (r - b > 15) & (r - b < 60)
+    return float(m.mean())
+
+
+def _load_revive_mask():
+    global _revive_mask
+    if _revive_mask is None and os.path.exists(_REVIVE_MASK_PATH):
+        m = cv2.imread(_REVIVE_MASK_PATH, cv2.IMREAD_GRAYSCALE)
+        if m is not None:
+            _revive_mask = (m > 127).astype(np.uint8)
+    return _revive_mask
+
+
+def find_revive_popup(img: np.ndarray):
+    """Returns ('ok', (x, y)) when the 불사신부 popup is visible (click (x, y) = 확인),
+    ('unknown', None) when a 확인/취소 dialog is at that spot but the message text does not
+    match (never click), or None when no such dialog is there."""
+    tpl = _load_revive_mask()
+    if tpl is None or img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return None
+    if _warm_fill(img, REVIVE_OK_BOX) < 0.55 or _warm_fill(img, REVIVE_CANCEL_BOX) < 0.55:
+        return None
+    if _warm_fill(img, REVIVE_GAP_BOX) > 0.15:
+        return None
+    k3 = np.ones((3, 3), np.uint8)
+    k5 = np.ones((5, 5), np.uint8)
+    t_d = cv2.dilate(tpl, k3)
+    x0, y0, x1, y1 = REVIVE_TEXT_BOX
+    best = (0.0, 0.0)
+    for dy in (-2, -1, 0, 1, 2):
+        for dx in (-2, -1, 0, 1, 2):
+            reg = img[y0 + dy:y1 + dy, x0 + dx:x1 + dx]
+            if reg.shape[:2] != tpl.shape:
+                continue
+            c = (cv2.cvtColor(reg, cv2.COLOR_BGR2GRAY) > 140).astype(np.uint8)
+            n = int(c.sum())
+            if n == 0:
+                continue
+            recall = float(np.logical_and(tpl, cv2.dilate(c, k5)).sum()) / max(1, int(tpl.sum()))
+            prec = float(np.logical_and(c, t_d).sum()) / n
+            if min(recall, prec) > min(best):
+                best = (recall, prec)
+    if min(best) >= REVIVE_TEXT_MIN:
+        return ('ok', REVIVE_CLICK_XY)
+    return ('unknown', None)
+
+
+# ---- 포만감 gauge, 용병 portraits, inventory (measured 2026-11-19 on a native 1024x768 client) ----
+_UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'ui_templates')
+FOOD_BAR_X = (89, 235)          # first/last pixel column of the gauge
+FOOD_BAR_Y = 673                # a row through the fill (fill is y 670..677)
+FOOD_LOW_FRAC = 0.2
+
+
+def food_fraction(img: np.ndarray):
+    """포만감 fill 0.0..1.0, or None if the gauge is not on screen (battle scene, covered...)."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return None
+    # frame of the gauge: black line above the fill and the dark right border
+    if int(img[669, 150].sum()) > 40 or int(img[FOOD_BAR_Y, FOOD_BAR_X[1] + 1].sum()) > 60:
+        return None
+    n = 0
+    for x in range(FOOD_BAR_X[0], FOOD_BAR_X[1] + 1):
+        b, g, r = (int(v) for v in img[FOOD_BAR_Y, x])
+        if g > r + 25 and g > b + 25 and g > 70:
+            n += 1
+        else:
+            break
+    return n / float(FOOD_BAR_X[1] - FOOD_BAR_X[0] + 1)
+
+
+MERC_BAR_ROWS = tuple(35 + 41 * i for i in range(12))   # red HP bar rows of the 12 portrait slots
+MERC_BAR_X = (4, 84)
+
+
+def _merc_has_bar(img: np.ndarray, y0: int) -> bool:
+    """Red HP bar present in the slot's bar row: 2 of 3 consecutive rows with >= 4 red pixels
+    (searched +-9 px because the selection frame shifts one slot). Any HP above ~5% shows, a dead
+    merc shows none, and portrait art rarely produces a 3-row red streak."""
+    for y in range(y0 - 9, y0 + 12):
+        band = img[y:y + 3, 6:88].astype(np.int16)
+        red = (band[..., 2] > 140) & (band[..., 1] < 70) & (band[..., 0] < 70)
+        if int((red.sum(axis=1) >= 4).sum()) >= 2:
+            return True
+    return False
+
+
+def dead_mercs(img: np.ndarray) -> list:
+    """1-based portrait slots whose portrait is shown but whose red HP bar is gone (= dead)."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    dead = []
+    for i, y0 in enumerate(MERC_BAR_ROWS):
+        if _merc_has_bar(img, y0):
+            continue          # alive
+        port = img[max(0, y0 - 34):y0 - 1, 6:80]
+        gray = cv2.cvtColor(port, cv2.COLOR_BGR2GRAY)
+        if gray.mean() >= 30 and gray.std() >= 15:     # a portrait is there (not an empty panel)
+            dead.append(i + 1)
+    return dead
+
+
+INV_HEADER_XY = (690, 100)
+INV_CELL_R1C2 = (640, 172)       # 궁중 타락죽 (row 1, column 2 of the 가방 tab)
+INV_CELL_ICON_XY = (622, 154)
+INV_MATCH_MIN = 0.85
+_tpl_cache = {}
+
+
+def _tpl(name):
+    if name not in _tpl_cache:
+        _tpl_cache[name] = cv2.imread(os.path.join(_UI_DIR, name))
+    return _tpl_cache[name]
+
+
+def _match_at(img, tpl, xy, pad=6):
+    if tpl is None or img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return 0.0
+    x, y = xy
+    h, w = tpl.shape[:2]
+    reg = img[max(0, y - pad):y + h + pad, max(0, x - pad):x + w + pad]
+    if reg.shape[0] < h or reg.shape[1] < w:
+        return 0.0
+    return float(cv2.matchTemplate(reg, tpl, cv2.TM_CCOEFF_NORMED).max())
+
+
+def inventory_open(img: np.ndarray) -> bool:
+    """The 가방 window is open at its default position."""
+    return _match_at(img, _tpl('inventory_header.png'), INV_HEADER_XY) >= INV_MATCH_MIN
+
+
+def porridge_in_r1c2(img: np.ndarray) -> bool:
+    """Row 1, column 2 of the open inventory shows the 궁중 타락죽 icon."""
+    return _match_at(img, _tpl('porridge_icon.png'), INV_CELL_ICON_XY) >= INV_MATCH_MIN
+
+
+def merc_slots(img: np.ndarray) -> list:
+    """[(slot 1..12, has_hp_bar, portrait_mean_gray)] for the 용병 portrait column."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    out = []
+    for i, y0 in enumerate(MERC_BAR_ROWS):
+        port = img[max(0, y0 - 34):y0 - 1, 6:80]
+        out.append((i + 1, _merc_has_bar(img, y0), float(cv2.cvtColor(port, cv2.COLOR_BGR2GRAY).mean())))
+    return out
+
+
+def merc_gauge(img: np.ndarray, y0: int):
+    """(red_px, blue_px) of the HP and mana gauges in the slot's bar band (searched +-9 rows,
+    the selection frame shifts the lower slots by a few pixels)."""
+    best = (0, 0)
+    for y in range(y0 - 9, y0 + 12):
+        band = img[y:y + 12, 8:76].astype(np.int16)
+        b, g, r = band[..., 0], band[..., 1], band[..., 2]
+        red = int(((r > 140) & (g < 70) & (b < 70)).sum())
+        blue = int(((b > 120) & (r < 130) & (b - r > 25)).sum())
+        if red + blue > best[0] + best[1]:
+            best = (red, blue)
+    return best
+
+
+MERC_GAUGE_MIN = 20     # alive units show >= ~200 red and ~200 blue px; a dead one shows 0 of both
+
+
+def merc_alive_slots(img: np.ndarray) -> list:
+    """Slots that show an HP or mana gauge (= a live unit)."""
+    if img is None or img.shape[0] < 768 or img.shape[1] < 1024:
+        return []
+    out = []
+    for i, y0 in enumerate(MERC_BAR_ROWS):
+        red, blue = merc_gauge(img, y0)
+        if red >= MERC_GAUGE_MIN or blue >= MERC_GAUGE_MIN:
+            out.append(i + 1)
+    return out
+
+
+def dead_mercs_v2(img: np.ndarray, occupied=()) -> list:
+    """Dead 용병 = a slot with NO HP gauge and NO mana gauge that still holds a unit.
+    Held = a live unit sits in a lower slot (units fill the column from the top, so a gap above a
+    live one is a dead one), or the slot was seen alive earlier (`occupied`, persisted)."""
+    alive = merc_alive_slots(img)
+    if not alive:
+        return []          # no gauge anywhere: window covered, loading, or the wrong screen
+    last_alive = max(alive)
+    out = []
+    for slot in range(1, 13):
+        if slot in alive:
+            continue
+        if slot < last_alive or slot in occupied:
+            out.append(slot)
+    return out
+
+===== detector.py (   24299 bytes) =====
+# Source Generated with Decompyle++
+# File: detector.pyc (Python 3.11)
+
+import glob
+import json
+import os
+import threading
+import time
+import cv2
+import numpy as np
+AGF_TOOLS_DIR = os.path.expanduser(os.path.join('~', 'AGF'))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SPRITE_ASSIGN_DIRS = (os.path.join(AGF_TOOLS_DIR, 'assignments'), os.path.join(BASE_DIR, 'assets', 'sprite'))
+FIELD_H = 651
+CENTER = np.array([
+    512,
+    340], dtype = np.float32)
+X_SCALE = 0.75
+GATE_X = (40, 984)
+GATE_Y = (40, 614)
+CLICK_FRAMES = 10
+COOLDOWN_LOOPS = CLICK_FRAMES - 1
+SEARCH_EXPAND_FRAMES = 10
+SPRITE_AVOID2_DELAY_SEC = 8.0
+
+class SearchWindow:
+    
+    def __init__(self):
+        self.age = 0
+        self.was_main = False
+
+    
+    def update(self, is_main):
+        if not is_main or not self.was_main:
+            self.reset()
+        self.was_main = is_main
+
+    
+    def advance(self, n=1.0):
+        # n = elapsed time in 0.1 s units, so the search window grows at the same wall-clock
+        # speed whatever the loop rate is (it was 1 per loop when the loop ran at 10 Hz)
+        self.age = min(SEARCH_EXPAND_FRAMES, self.age + n)
+
+    
+    def reset(self):
+        self.age = 0
+
+    
+    def scale(self):
+        return 0.5 + 0.5 * self.age / SEARCH_EXPAND_FRAMES
+
+    scale = property(scale)
+
+AVOID_OVERLAP = 0.8
+(FIRE_R_MIN, FIRE_RB_DIFF, FIRE_G_MIN) = (200, 90, 80)
+(FIRE_SEED_R, FIRE_SEED_G, FIRE_SEED_B_MAX) = (245, 200, 190)
+FIRE_ROI_DEFAULT = (0.5, 0.8, 28)
+FIRE_BLOB_MIN = 40
+FIRE_LOW_INTACT = 0.45
+
+def fire_ambient(frame_bgr, box):
+    (H, W) = frame_bgr.shape[:2]
+    (x1, y1, x2, y2) = (int(v) for v in box)
+    (w, h) = (x2 - x1, y2 - y1)
+    patches = ((x1, y1 - int(h * 1.2), x2, y1 - int(h * 0.85)), (x1, y2 + int(h * 0.15), x2, y2 + int(h * 0.5)), (x1 - int(w * 1.0), y1 + h // 4, x1 - int(w * 0.2), y2), (x2 + int(w * 0.2), y1 + h // 4, x2 + int(w * 1.0), y2))
+    fiery = valid = 0
+    for px0, py0, px1, py1 in patches:
+        (px0, py0) = (max(0, px0), max(0, py0))
+        (px1, py1) = (min(W, px1), min(H, py1))
+        if px1 - px0 < 8 or py1 - py0 < 6:
+            continue
+        valid += 1
+        if fire_pixels(frame_bgr[py0:py1, px0:px1]) >= 16:
+            fiery += 1
+    return valid > 0 and fiery >= -(-valid * 3 // 4)
+
+FIRE_REGION_TOP = 0.4
+FIRE_REGION_PAD_X = 6
+FIRE_REGION_PAD_B = 8
+
+def fire_region(box, rect = None):
+    (x1, y1, x2, y2) = (int(v) for v in box)
+    if rect is None:
+        return (max(0, x1 - FIRE_REGION_PAD_X), y1 + int((y2 - y1) * FIRE_REGION_TOP), x2 + FIRE_REGION_PAD_X, y2 + FIRE_REGION_PAD_B)
+    (w, h) = (x2 - x1, y2 - y1)
+    (rx0, ry0, rx1, ry1) = rect
+    return (x1 + int(w * rx0), y1 + int(h * ry0), x1 + int(w * rx1), y1 + int(h * ry1))
+
+
+def fire_pixels(roi_bgr):
+    if roi_bgr.size == 0:
+        return 0
+    b = roi_bgr[:, :, 0].astype(np.int16)
+    g = roi_bgr[:, :, 1].astype(np.int16)
+    r = roi_bgr[:, :, 2].astype(np.int16)
+    orange = (r > FIRE_R_MIN) & (r - b > FIRE_RB_DIFF) & (g > FIRE_G_MIN)
+    core = (r > FIRE_SEED_R) & (g > FIRE_SEED_G) & (b < FIRE_SEED_B_MAX)
+    if not core.any():
+        return 0
+    m8 = cv2.morphologyEx((orange | core).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    (n, lab) = cv2.connectedComponents(m8)
+    if n <= 1:
+        return 0
+    valid = np.unique(lab[core])
+    valid = valid[valid > 0]
+    if len(valid) == 0:
+        return 0
+    return int(np.bincount(lab.ravel())[valid].max())
+
+
+def roi_in_box(frame_bgr, box, roi = None, rect = None):
+    (x0, y0, x1, y1) = fire_region(box, rect)
+    return frame_bgr[max(0, y0):max(0, y1), max(0, x0):max(0, x1)]
+
+
+def _subtract_sprite_alpha(observed, reference):
+    obs = observed.astype(np.float32)
+    src = reference[:, :, :3].astype(np.float32)
+    alpha = reference[:, :, 3:4].astype(np.float32) / 255.0
+    remaining = np.maximum(1.0 - alpha, 0.00392156862745098)
+    blended = (alpha[:, :, 0] > 0) & (alpha[:, :, 0] < 1) & np.all((obs >= alpha * src - 3) & (obs <= alpha * src + 255 * (1 - alpha) + 3), axis = 2)
+    low = (obs - alpha * src - 3) / remaining
+    high = ((obs - alpha * src) + 3) / remaining
+    background = np.stack((high[:, :, 0], low[:, :, 1], low[:, :, 2]), axis = 2)
+    filtered = observed.copy()
+    filtered[blended] = np.clip(background, 0, 255).astype(np.uint8)[blended]
+    same = (alpha[:, :, 0] > 0) & (np.abs(obs - src).max(axis = 2) <= 3)
+    filtered[same] = 0
+    return filtered
+
+
+def _fire_roi_without_sprite(frame_bgr, box, rect, sprite_bgra, sprite_alpha = False):
+    crop = roi_in_box(frame_bgr, box, rect = rect)
+    (bx0, by0, bx1, by1) = (int(v) for v in box)
+    if crop.size == 0 or sprite_bgra.shape != (by1 - by0, bx1 - bx0, 4):
+        return crop
+    (rx0, ry0, _rx1, _ry1) = fire_region(box, rect)
+    (rx0, ry0) = (max(0, rx0), max(0, ry0))
+    (x0, y0) = (max(rx0, bx0), max(ry0, by0))
+    x1 = min(rx0 + crop.shape[1], bx1)
+    y1 = min(ry0 + crop.shape[0], by1)
+    if x1 <= x0 or y1 <= y0:
+        return crop
+    reference = sprite_bgra[y0 - by0:y1 - by0, x0 - bx0:x1 - bx0]
+    observed = crop[y0 - ry0:y1 - ry0, x0 - rx0:x1 - rx0]
+    if sprite_alpha:
+        filtered = crop.copy()
+        filtered[y0 - ry0:y1 - ry0, x0 - rx0:x1 - rx0] = _subtract_sprite_alpha(observed, reference)
+        return filtered
+    same = (reference[:, :, 3] > 200) & (np.abs(observed.astype(np.int16) - reference[:, :, :3].astype(np.int16)).max(axis = 2) <= 3)
+    if not same.any():
+        return crop
+    filtered = crop.copy()
+    filtered[y0 - ry0:y1 - ry0, x0 - rx0:x1 - rx0][same] = 0
+    return filtered
+
+
+def box_has_fire(frame_bgr, box, roi = None, rect = None, sprite_bgra = None, sprite_alpha = False):
+    crop = roi_in_box(frame_bgr, box, rect = rect) if sprite_bgra is None else _fire_roi_without_sprite(frame_bgr, box, rect, sprite_bgra, sprite_alpha)
+    return fire_pixels(crop) >= FIRE_BLOB_MIN
+
+DIGIT_ROI = (490, 225, 560, 335)
+DIGIT_MATCH_MIN = 0.6
+DUMMY_NEAR_DIST = 90.0
+DUMMY_STACK_STOP = 6
+DUMMY_RESET_LOOPS = 20
+DIGIT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'digits')
+_digit_tpl = None
+_digit_dump_at = 0.0
+DIGIT_DUMP_KEEP = 200
+_digit_prune_busy = False
+
+def _remove_files(paths):
+    global _digit_prune_busy
+    for f in paths:
+        try:
+            os.remove(f)
+        except Exception:
+            continue
+    _digit_prune_busy = False
+
+
+def _prune_digit_dumps(d):
+    global _digit_prune_busy
+    if _digit_prune_busy:
+        return None
+    
+    try:
+        files = sorted(glob.glob(os.path.join(d, 'd_*.png')))
+    except Exception:
+        return None
+
+    old = files[:-DIGIT_DUMP_KEEP] if len(files) > DIGIT_DUMP_KEEP else []
+    if not old:
+        return None
+    if len(old) > 50:
+        _digit_prune_busy = True
+        threading.Thread(target = _remove_files, args = (old,), daemon = True).start()
+        return None
+    _remove_files(old)
+
+
+def _digit_mask(roi_bgr):
+    b = roi_bgr[:, :, 0].astype(np.int16)
+    g = roi_bgr[:, :, 1].astype(np.int16)
+    r = roi_bgr[:, :, 2].astype(np.int16)
+    return ((r >= 190) & (g >= 90) & (g <= 210) & (b <= 130)).astype(np.uint8)
+
+
+def _digit_templates():
+    global _digit_tpl
+    if _digit_tpl is None:
+        _digit_tpl = { }
+        for p in glob.glob(os.path.join(DIGIT_DIR, '*.png')):
+            name = os.path.splitext(os.path.basename(p))[0]
+            img = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
+            if img is not None and len(name) == 1 and name.isdigit():
+                _digit_tpl[name] = (img > 127).astype(np.float32)
+    return _digit_tpl
+
+
+def read_top_number(frame_bgr, dump_dir = None):
+    global _digit_dump_at
+    tpl = _digit_templates()
+    if not tpl:
+        return None
+    (x0, y0, x1, y1) = DIGIT_ROI
+    if frame_bgr.shape[0] < y1 or frame_bgr.shape[1] < x1:
+        return None
+    roi = frame_bgr[y0:y1, x0:x1]
+    mask = _digit_mask(roi)
+    (n, lab, stats, _) = cv2.connectedComponentsWithStats(mask, 8)
+    keep = np.zeros_like(mask)
+    for i in range(1, n):
+        a = int(stats[i, cv2.CC_STAT_AREA])
+        h = int(stats[i, cv2.CC_STAT_HEIGHT])
+        if 25 <= a <= 500 and h <= 50:
+            keep[lab == i] = 1
+    if int(keep.sum()) < 60:
+        return None
+    m = keep.astype(np.float32)
+    (best, score) = (None, 0.0)
+    for name, t in tpl.items():
+        s = float(cv2.matchTemplate(m, t, cv2.TM_CCOEFF_NORMED).max())
+        if s > score:
+            (best, score) = (name, s)
+    if score >= DIGIT_MATCH_MIN:
+        return best
+    if dump_dir and time.time() - _digit_dump_at >= 5.0:
+        _digit_dump_at = time.time()
+        
+        try:
+            os.makedirs(dump_dir, exist_ok = True)
+            cv2.imwrite(os.path.join(dump_dir, time.strftime('d_%Y%m%d_%H%M%S.png')), roi)
+            _prune_digit_dumps(dump_dir)
+        except Exception:
+            pass
+    return None
+
+
+BOX_TL_BGR = (89, 193, 216)
+BOX_TR_BGR = (84, 191, 215)
+BOX_BL_BGR = (83, 193, 219)
+BOX_BR_BGR = (86, 193, 215)
+BOX_TOL = 10
+MOB_PIXEL_BGR = (255, 255, 88)
+MOB_PIXEL_TOL = 20
+
+def _find_corner_pattern(frame_bgr, tl, tr, bl, br, tol):
+    img = frame_bgr[:FIELD_H].astype(np.int16)
+    (TL, TR) = (img[:-1, :-1], img[:-1, 1:])
+    (BL, BR) = (img[1:, :-1], img[1:, 1:])
+    mask = (np.abs(TL - tl) <= tol).all(2) & (np.abs(TR - tr) <= tol).all(2) & (np.abs(BL - bl) <= tol).all(2) & (np.abs(BR - br) <= tol).all(2)
+    (ys, xs) = np.nonzero(mask)
+    if xs.size == 0:
+        return np.empty((0, 2), dtype = np.float32)
+    return np.stack([
+        xs,
+        ys], axis = 1).astype(np.float32)
+
+
+def find_boxes(frame_bgr):
+    return _find_corner_pattern(frame_bgr, BOX_TL_BGR, BOX_TR_BGR, BOX_BL_BGR, BOX_BR_BGR, BOX_TOL)
+
+
+def find_pixel_mobs(frame_bgr):
+    return _find_corner_pattern(frame_bgr, MOB_PIXEL_BGR, MOB_PIXEL_BGR, MOB_PIXEL_BGR, MOB_PIXEL_BGR, MOB_PIXEL_TOL)
+
+
+def _overlap_frac(mob, avoids):
+    (mx1, my1, mx2, my2) = mob
+    area = max(1.0, (mx2 - mx1) * (my2 - my1))
+    best = 0.0
+    for ax1, ay1, ax2, ay2 in avoids:
+        iw = min(mx2, ax2) - max(mx1, ax1)
+        ih = min(my2, ay2) - max(my1, ay1)
+        if iw > 0 and ih > 0:
+            best = max(best, iw * ih / area)
+    return best
+
+
+class MobDetector:
+    
+    def __init__(self, model_path, conf = 0.8, classes = ('mob',), imgsz = None, avoid_conf = None):
+        self.model_path = model_path
+        self.conf = conf
+        self.avoid_conf = conf if avoid_conf is None else avoid_conf
+        self.classes = set(classes)
+        self.imgsz = imgsz
+        self.model = None
+        self.names = None
+        self.ready = False
+
+    
+    def preload(self):
+        from ultralytics import YOLO
+        self.model = YOLO(self.model_path)
+        self.names = self.model.names
+        if self.imgsz is None:
+            
+            try:
+                self.imgsz = int(self.model.ckpt['train_args']['imgsz'])
+            except Exception:
+                self.imgsz = 512
+
+        dummy = np.zeros((self.imgsz, self.imgsz, 3), dtype = np.uint8)
+        self.model.predict(source = dummy, imgsz = self.imgsz, conf = self.conf, verbose = False)
+        self.ready = True
+
+    
+    def detect(self, frame_bgr, conf = None, fire_roi = None, with_conf = False, trust_avoid = None, fire_rect = None):
+        empty = np.empty((0, 2), dtype = np.float32)
+        empty_cf = np.empty((0,), dtype = np.float32)
+        if not self.ready:
+            return (empty, empty_cf) if with_conf else empty
+        trust = fire_roi is None if trust_avoid is None else bool(trust_avoid)
+        mob_th = self.conf if conf is None else conf
+        avoid_th = self.avoid_conf if conf is None else conf
+        rgb = cv2.cvtColor(frame_bgr[:FIELD_H], cv2.COLOR_BGR2RGB)
+        r = self.model.predict(source = rgb, imgsz = self.imgsz, conf = min(mob_th, avoid_th), verbose = False)[0]
+        (cands, avoids, avoid2s) = ([], [], [])
+        for box, cls, cf in zip(r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
+            name = self.names[int(cls)]
+            xy = box.tolist()
+            if name in self.classes:
+                if float(cf) >= mob_th:
+                    cands.append((xy, float(cf)))
+                continue
+            if name == 'avoid2':
+                if float(cf) >= avoid_th:
+                    avoid2s.append(xy)
+                continue
+            if name.startswith('avoid') and float(cf) >= avoid_th:
+                if trust:
+                    avoids.append(xy)
+                    continue
+                cands.append((xy, float(cf)))
+        excl = avoid2s + avoids
+        (out, out_cf) = ([], [])
+        for box, cf in cands:
+            (x1, y1, x2, y2) = box
+            if excl and _overlap_frac((x1, y1, x2, y2), excl) >= AVOID_OVERLAP:
+                continue
+            (cx, cy) = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            if fire_roi is not None and box_has_fire(frame_bgr, box, fire_roi, rect = fire_rect):
+                continue
+            out.append([
+                cx,
+                cy])
+            out_cf.append(cf)
+        coords = np.array(out, dtype=np.float32) if out else empty
+        if with_conf:
+            return (coords, np.array(out_cf, dtype=np.float32) if out_cf else empty_cf)
+        return coords
+
+
+
+class SpriteDetector:
+    _FIRE_SPRITE_EXCLUDE = frozenset({
+        'ghostjy_m',
+        'ghostjy_n',
+        'ghostpm_m',
+        'ghostpm_n',
+        'jiphaeng_m',
+        'jiphaeng_n',
+        'master_pil_m',
+        'master_pil_n',
+        'lord_kumchun_m',
+        'lord_kumchun_n',
+        'lord_shinnong_m',
+        'lord_shinnong_n'})
+    _FIRE_ALPHA_EXCLUDE = frozenset({
+        'jiphaeng_n',
+        'jiphaeng_m'})
+    
+    def __init__(self, agf_names):
+        self.agf_names = list(agf_names)
+        self.matcher = None
+        self.frame_cls = { }
+        self.names = {
+            0: 'mob' }
+        self.ready = False
+        self._fire_sprites = { }
+
+    
+    @staticmethod
+    def _load_assign(stem):
+        for d in SPRITE_ASSIGN_DIRS:
+            try:
+                with open(os.path.join(d, stem + '.json'), encoding='utf-8') as fp:
+                    return json.load(fp)['classes']
+            except Exception:
+                continue
+        return None
+
+    
+    def preload(self):
+        import sprite_match
+        paths = sprite_match.resolve_agf_paths(self.agf_names)
+        fire_sprites = { }
+        skip = set()
+        for p in paths:
+            stem = os.path.splitext(os.path.basename(p))[0]
+            cls = self._load_assign(stem)
+            if cls is None:
+                continue
+            self.frame_cls[stem] = { i: c for i, c in enumerate(cls) if c != 'mob' }
+            skip |= { (stem, i) for i, c in enumerate(cls) if c in ('other', 'skip') }
+        bg_dir = os.path.join(BASE_DIR, 'snapshots')
+        bg_counts = None
+        if not glob.glob(os.path.join(bg_dir, '*.png')):
+            bg_dir = None
+            hist = os.path.join(BASE_DIR, 'assets', 'sprite', 'bg_hist.npz')
+            
+            try:
+                import numpy as _np
+                z = _np.load(hist)
+                bg_counts = dict(zip(z['colors'].tolist(), z['counts'].tolist()))
+            except Exception:
+                pass
+
+        self.matcher = sprite_match.SpriteMatcher(paths, bg_dir=bg_dir, bg_counts=bg_counts, skip_frames=skip, log=lambda *a, **k: None)
+        for p in paths:
+            stem = os.path.splitext(os.path.basename(p))[0]
+            if stem not in self._FIRE_SPRITE_EXCLUDE:
+                continue
+            source = sprite_match.AgfFile(p)
+            for i in range(source.nframes):
+                if (stem, i) not in skip:
+                    fire_sprites[stem, i] = sprite_match._trim(source.frame(i))
+        self._fire_sprites = fire_sprites
+        self.ready = True
+
+    
+    def fire_reference(self, tag):
+        (stem, fr) = tag.rsplit(':', 1)
+        mirror = fr.endswith('M')
+        idx = int(fr[:-1]) if mirror else int(fr)
+        reference = self._fire_sprites.get((stem, idx))
+        return reference[:, ::-1] if reference is not None and mirror else reference
+
+    
+    def has_fire(self, frame_bgr, box, tag, roi = None, rect = None):
+        return box_has_fire(frame_bgr, box, roi, rect = rect, sprite_bgra = self.fire_reference(tag), sprite_alpha = tag.rsplit(':', 1)[0] in self._FIRE_ALPHA_EXCLUDE)
+
+    
+    def detect(self, frame_bgr, conf = None, fire_roi = None, with_conf = False, trust_avoid = None, fire_rect = None, *, allow_avoid2 = False):
+        empty = np.empty((0, 2), dtype = np.float32)
+        empty_cf = np.empty((0,), dtype = np.float32)
+        if not self.ready:
+            return (empty, empty_cf) if with_conf else empty
+        (cands, excl) = ([], [])
+        for x, y, w, h, sc, tag, lowf in self.matcher.detect(frame_bgr):
+            (stem, fr) = tag.rsplit(':', 1)
+            mirror = fr.endswith('M')
+            idx = int(fr[:-1]) if mirror else int(fr)
+            cls = self.frame_cls.get(stem, { }).get(idx)
+            box = (x, y, x + w, y + h)
+            if cls == 'avoid2' and mirror and allow_avoid2:
+                excl.append(box)
+                continue
+            if cls in ('other', 'skip'):
+                continue
+            cands.append((box, sc, lowf, tag))
+        (out, out_cf) = ([], [])
+        for box, cf, lowf, tag in cands:
+            if excl and _overlap_frac(box, excl) >= AVOID_OVERLAP:
+                continue
+            if fire_roi is not None and self.has_fire(frame_bgr, box, tag, fire_roi, rect = fire_rect):
+                # Fire ring at the mob's feet = another player/party is already fighting it.
+                # With a tuned fire_rect that is decisive. (The decompiled condition used to
+                # skip such a mob only when the fire was 'ambient', so engaged mobs were kept:
+                # live 2026-11-19, 3 of 3 ringed 도사_귀 flagged, 2 of them still clicked.)
+                if fire_rect or lowf < FIRE_LOW_INTACT or fire_ambient(frame_bgr, box):
+                    continue
+            out.append([
+                (box[0] + box[2]) / 2.0,
+                (box[1] + box[3]) / 2.0])
+            out_cf.append(cf)
+        coords = np.array(out, dtype=np.float32) if out else empty
+        if with_conf:
+            return (coords, np.array(out_cf, dtype=np.float32) if out_cf else empty_cf)
+        return coords
+
+
+
+def corrected_dist(coords):
+    dx = (coords[:, 0] - CENTER[0]) * X_SCALE
+    dy = coords[:, 1] - CENTER[1]
+    return np.sqrt(dx * dx + dy * dy)
+
+
+# Screen areas that are HUD, never ground: a click there opens a window or presses a button
+# (the 용병 portrait column opens that merc's 가방/status window, which freezes the macro).
+UI_BLOCK_RECTS = (
+    (0, 0, 100, 525),        # 용병 portraits + their HP bars
+    (0, 0, 350, 90),         # top-left stat box (shown on hover) and portrait 1
+    (100, 0, 665, 52),       # top toolbar icons
+    (820, 0, 1024, 205),     # minimap
+    (955, 355, 1024, 650),   # right-hand button column
+    (0, 555, 335, 700),      # Alt+1 / Alt+2 quick slots
+    (0, 640, 1024, 768),     # bottom HUD
+)
+
+
+def ui_blocked(x, y) -> bool:
+    return any(x0 <= x < x1 and y0 <= y < y1 for x0, y0, x1, y1 in UI_BLOCK_RECTS)
+
+
+def drop_ui_points(coords):
+    """Remove detections that sit on the HUD so the next-nearest real mob is picked instead."""
+    if coords is None or coords.shape[0] == 0:
+        return coords
+    keep = np.array([not ui_blocked(float(c[0]), float(c[1])) for c in coords], dtype=bool)
+    return coords[keep]
+
+
+class DummyGuard:
+    """Decides when a mob that keeps being re-clicked is a dummy (cannot be attacked / unreachable).
+
+    The old rule stopped the whole macro after 6 re-clicks with no digit read, which is about 6 s:
+    a mob that is simply being walked to, or a digit the reader missed, ended the run (a fight often
+    started seconds later). Now a mob must stay unanswered for MIN_SECONDS of real time AND
+    MIN_CLICKS re-clicks. Then that spot is skipped for BLACKLIST_SEC and hunting goes on; only
+    repeated blacklisting with no fight in between (ESCALATE within ESCALATE_WINDOW) stops it.
+    Any fight start / digit read calls progress() and clears everything.
+    """
+    NEAR = DUMMY_NEAR_DIST
+    MIN_CLICKS = DUMMY_STACK_STOP
+    MIN_SECONDS = 15.0
+    STALE_SECONDS = 3.0
+    BLACKLIST_SEC = 45.0
+    BLACKLIST_RADIUS = 45.0
+    ESCALATE = 3
+    ESCALATE_WINDOW = 180.0
+    # On a crowded map (many players standing on the mobs) most clicks land on a mob that cannot be
+    # attacked, so several spots get skipped in a row. The rule therefore never stops the macro: once
+    # enough spots are skipped it clears the whole list and starts over, which keeps it clicking until
+    # the countdown actually starts. A real disconnect is caught by the separate no-fight clock.
+    RESET_AFTER = 4
+
+    def __init__(self):
+        self.spots = {}      # rounded (x, y) -> [clicks, first_t]
+        self.last_key = None
+        self.last_t = None
+        self.black = []      # (x, y, expires)
+        self.events = []     # times of blacklisting with no progress in between
+
+    @property
+    def clicks(self):
+        """Re-clicks on the spot clicked last: the first click on a new spot is not a re-click."""
+        v = self.spots.get(self.last_key)
+        return v[0] - 1 if v else 0
+
+    @property
+    def first_t(self):
+        v = self.spots.get(self.last_key)
+        return v[1] if v else None
+
+    def progress(self):
+        """A fight started or the countdown digit was seen: the clicks worked."""
+        self.spots = {}
+        self.last_key = None
+        self.last_t = None
+        self.events = []
+
+    def click(self, x, y, dist, now):
+        """Register a mob click. Returns 'ok', 'suspect' (n-th unanswered re-click), 'skip' (skip this
+        spot and keep hunting) or 'skip_all' (every skipped spot was cleared - retry everything).
+
+        The counter is kept PER SPOT, not against the previous click: on a crowded map the nearest
+        mob changes every time, and one shared counter that reset on every change never reached the
+        limit, so nothing was ever skipped and the no-fight clock stopped the run.
+        """
+        if self.last_t is not None and now - self.last_t > self.STALE_SECONDS:
+            self.spots = {}
+            self.last_key = None
+        self.last_t = now
+        key = (int(round(x / 25.0)), int(round(y / 25.0)))
+        self.last_key = key
+        spot = self.spots.setdefault(key, [0, now])
+        spot[0] += 1
+        if spot[0] < self.MIN_CLICKS or now - spot[1] < self.MIN_SECONDS:
+            return 'suspect' if spot[0] > 1 else 'ok'
+        self.black.append((x, y, now + self.BLACKLIST_SEC))
+        self.events = [t for t in self.events if now - t < self.ESCALATE_WINDOW] + [now]
+        del self.spots[key]
+        if len(self.events) >= self.ESCALATE and len(self.black) >= self.RESET_AFTER:
+            self.black = []
+            self.events = []
+            self.spots = {}
+            return 'skip_all'
+        return 'skip'
+
+    def filter(self, coords, now):
+        """Drop detections on a skipped spot."""
+        self.black = [b for b in self.black if b[2] > now]
+        if coords is None or not self.black or coords.shape[0] == 0:
+            return coords
+        keep = np.ones(coords.shape[0], dtype=bool)
+        for bx, by, _ in self.black:
+            keep &= np.hypot(coords[:, 0] - bx, coords[:, 1] - by) > self.BLACKLIST_RADIUS
+        return coords[keep]
+
+
+def nearest_in_gate(coords, scale = 1.0, center = None):
+    coords = drop_ui_points(coords)
+    if coords is None or coords.shape[0] == 0:
+        return None
+    gx = (GATE_X[0] + GATE_X[1]) / 2.0
+    gy = (GATE_Y[0] + GATE_Y[1]) / 2.0
+    if center is not None and scale < 1.0:
+        (gx, gy) = center
+    hx = ((GATE_X[1] - GATE_X[0]) / 2.0) * scale
+    hy = ((GATE_Y[1] - GATE_Y[0]) / 2.0) * scale
+    mask = (coords[:, 0] >= max(GATE_X[0], gx - hx)) & (coords[:, 0] <= min(GATE_X[1], gx + hx)) & (coords[:, 1] >= max(GATE_Y[0], gy - hy)) & (coords[:, 1] <= min(GATE_Y[1], gy + hy))
+    if not mask.any():
+        return None
+    d = corrected_dist(coords)
+    real = np.flatnonzero(mask)[np.argmin(d[mask])]
+    return (float(coords[real, 0]), float(coords[real, 1]), float(d[real]))
+
+
+def click_cooldown(dist):
+    return COOLDOWN_LOOPS
+
+
+===== wgc.py (    6983 bytes) =====
+# Decompiled with PyLingual (https://pylingual.io)
+# Internal filename: 'wgc.py'
+# Bytecode version: 3.11a7e (3495)
+# Source timestamp: 2026-09-14 10:45:15 UTC (1789382715)
+
+from __future__ import annotations
+import ctypes
+import ctypes.wintypes
+import ctypes.wintypes as wt
+import threading
+import time
+import numpy as np
+
+try:
+    ctypes.windll
+    ctypes.WinDLL
+except AttributeError:
+    class _StubDLL:
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+    class _StubLib:
+        def __getattr__(self, name):
+            return _StubDLL()
+    ctypes.windll = _StubLib()
+    ctypes.WinDLL = lambda *a, **k: _StubDLL()
+
+user32 = ctypes.windll.user32
+dwmapi = ctypes.windll.dwmapi
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
+_import_err: str | None = None
+try:
+    from windows_capture import WindowsCapture
+except Exception as e:
+    WindowsCapture = None
+    _import_err = f'{type(e).__name__}: {e}'
+def available() -> bool:
+    return WindowsCapture is not None
+def import_error() -> str | None:
+    return _import_err
+RENDER_SHIFT = ((-1), (-1))
+def _client_box(hwnd: int):
+    rc = wt.RECT()
+    if not user32.GetClientRect(hwnd, ctypes.byref(rc)):
+        return
+    else:
+        w, h = (rc.right - rc.left, rc.bottom - rc.top)
+        if w <= 0 or h <= 0:
+            return None
+        else:
+            org = wt.POINT(0, 0)
+            if not user32.ClientToScreen(hwnd, ctypes.byref(org)):
+                return
+            else:
+                ef = wt.RECT()
+                if dwmapi.DwmGetWindowAttribute(wt.HWND(hwnd), DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(ef), ctypes.sizeof(ef)) != 0:
+                    return
+                else:
+                    return (org.x - ef.left, org.y - ef.top, w, h)
+class _Session:
+    def __init__(self, hwnd: int):
+        self.hwnd = hwnd
+        self.lock = threading.Lock()
+        self.frame = None
+        self.frame_at = 0.0
+        self.frame_mono = 0.0
+        self.frames = 0
+        self.started_at = time.time()
+        self.error = None
+        self.alive = True
+        self._want_stop = False
+        self.thread = threading.Thread(target=self._run, daemon=True, name=f'wgc-{hwnd}')
+        self.thread.start()
+    def _run(self):
+        try:
+            cap = WindowsCapture(cursor_capture=False, window_hwnd=self.hwnd)
+            @cap.event
+            def on_frame_arrived(frame, ctl):
+                received_at = time.monotonic()
+                if self._want_stop:
+                    ctl.stop()
+                    return
+                else:
+                    buf = getattr(frame, 'frame_buffer', None)
+                    if buf is None:
+                        return
+                    else:
+                        bgr = np.array(buf[:, :, :3])
+                        with self.lock:
+                            self.frame = bgr
+                            self.frame_at = time.time()
+                            self.frame_mono = received_at
+                            self.frames += 1
+            @cap.event
+            def on_closed():
+                self.alive = False
+            cap.start()
+        except Exception as e:
+            self.error = f'{type(e).__name__}: {e}'
+        finally:
+            self.alive = False
+    def stop(self):
+        self._want_stop = True
+    def client_frame(self) -> np.ndarray | None:
+        sample = self.client_frame_info()
+        return sample[0] if sample is not None else None
+    def client_frame_info(self):
+        box = _client_box(self.hwnd)
+        if box is None:
+            return
+        else:
+            ox, oy, w, h = box
+            ox = max(0, ox + RENDER_SHIFT[0])
+            oy = max(0, oy + RENDER_SHIFT[1])
+            with self.lock:
+                f = self.frame
+                received_at, seq = (self.frame_mono, self.frames)
+            if f is None or oy + h > f.shape[0] or ox + w > f.shape[1] or (ox < 0) or (oy < 0):
+                return None
+            else:
+                return (np.ascontiguousarray(f[oy:oy + h, ox:ox + w]), received_at, seq)
+_sessions: dict[int, _Session] = {}
+_reg_lock = threading.Lock()
+FIRST_FRAME_WAIT = 1.5
+def _session(hwnd: int) -> _Session | None:
+    if not available() or not hwnd or (not user32.IsWindow(hwnd)):
+        _drop(hwnd)
+        return
+    else:
+        with _reg_lock:
+            s = _sessions.get(hwnd)
+            if s is not None and (s.alive or s.thread.is_alive()):
+                return s
+            else:
+                if s is not None:
+                    _sessions.pop(hwnd, None)
+                s = _Session(hwnd)
+                _sessions[hwnd] = s
+                return s
+def _drop(hwnd: int):
+    with _reg_lock:
+        s = _sessions.pop(hwnd, None)
+    if s is not None:
+        s.stop()
+def grab(hwnd: int) -> np.ndarray | None:
+    # ***<module>.grab: Failure detected at line number 138 and instruction offset 76: Different bytecode
+    s = _session(hwnd)
+    if s is None:
+        return
+    else:
+        f = s.client_frame()
+        if f is None and s.frames == 0 and (time.time() - s.started_at < FIRST_FRAME_WAIT):
+                    deadline = s.started_at + FIRST_FRAME_WAIT
+                    while time.time() < deadline and s.frames == 0 and (s.error is None):
+                        f = s.client_frame()
+                    else:
+                        time.sleep(0.01)
+        if f is None and s.error:
+                _drop(hwnd)
+        return f
+def grab_after(hwnd: int, after: float, timeout: float=0.25, stop=None):
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    if stop is not None and stop() or time.monotonic() >= deadline:
+        return None
+    s = _session(hwnd)
+    if s is None:
+        return
+    while time.monotonic() < deadline:
+        if stop is not None and stop():
+                return
+        if not s.alive or s.error or (not user32.IsWindow(hwnd)):
+            return None
+        sample = s.client_frame_info()
+        if sample is not None:
+            frame, received_at, seq = sample
+            if seq > 0 and received_at > after:
+                if (stop is None or not stop()) and time.monotonic() < deadline:
+                    return frame
+                else:
+                    return None
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.01, remaining))
+    return None
+def stop_all():
+    with _reg_lock:
+        sessions = list(_sessions.values())
+        _sessions.clear()
+    for s in sessions:
+        s.stop()
+def prune(live_hwnds) -> None:
+    keep = set(live_hwnds)
+    with _reg_lock:
+        dead = [h for h in _sessions if h not in keep or not user32.IsWindow(h)]
+    for h in dead:
+        _drop(h)
+def stats() -> list[dict]:
+    with _reg_lock:
+        items = list(_sessions.items())
+    now = time.time()
+    return [{'hwnd': h, 'frames': s.frames, 'alive': s.alive, 'age_ms': round((now - s.frame_at) * 1000) if s.frame_at else None, 'error': s.error} for h, s in items]
+===== config.py (   48772 bytes) =====
+# Source Generated with Decompyle++
+# File: config.pyc (Python 3.11)
+
+from __future__ import annotations
+import copy
+import hashlib
+import json
+import logging
+import math
+import os
+import tempfile
+import threading
+RES_DIR = os.path.dirname(os.path.abspath(__file__))   # read-only program files (assets, models, ui)
+if getattr(__import__('sys'), 'frozen', False):
+    # Installed app (Program Files is not writable): settings, logs and debug frames go to a user dir
+    BASE_DIR = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'GATO')
+    os.makedirs(BASE_DIR, exist_ok=True)
+else:
+    BASE_DIR = RES_DIR
+SETTINGS_PATH = os.path.join(BASE_DIR, 'prism_settings.json')
+MODEL_DIR = os.path.join(RES_DIR, 'assets', 'models', 'monster')
+PORTRAIT_DIR = os.path.join(RES_DIR, 'assets', 'imgs', 'monster')
+JOCHUL_MODEL = os.path.join(RES_DIR, 'assets', 'models', 'jochul', 'jochul.pt')
+TEXT_MODEL = os.path.join(RES_DIR, 'assets', 'models', 'text', 'best.pth')
+BATTLE_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'battle')
+DIGIT_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'digits')
+AIM_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'aim')
+JOCHUL_FAIL_DIR = os.path.join(BASE_DIR, 'debug', 'jochul_fail')
+JAMUN_DIR = os.path.join(BASE_DIR, 'debug', 'jamun')
+PACKET_DUMP_DIR = os.path.join(BASE_DIR, 'debug', 'packets')
+SIG_AUDIT_DIR = os.path.join(BASE_DIR, 'debug', 'sig_audit')
+BATTLE_SKIP_DIR = os.path.join(BASE_DIR, 'debug', 'battle_skip')
+PAN_DEBUG_DIR = os.path.join(BASE_DIR, 'debug', 'pan')
+BATTLE_COUNT_PATH = os.path.join(BASE_DIR, 'battle_count.txt')
+APPEAR_PATH = os.path.join(BASE_DIR, 'appear_records.txt')
+DEFAULT_MONSTER = '암령의시녀'
+MOB_CATEGORIES = [
+    '악몽(틈/근원)',
+    '신선곡',
+    '광려산/환상계곡',
+    '샴발라(천옥/관문)',
+    '기타']
+MOB_CATALOG = {
+    '암령의시녀': {
+        'model': 'best_mob_sogm.pt',
+        'conf': 0.9,
+        'aim_y': 0,
+        'portrait': 'sogm.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.7,
+            20],
+        'avoid_conf': 0.8,
+        'pan_dist': 0.3,
+        'sprite': [
+            'dark_gujimo_maid_n',
+            'dark_gujimo_maid_m'],
+        'fire_rect': [
+            0.22,
+            0.49,
+            0.78,
+            0.83],
+        'category': '광려산/환상계곡' },
+    '암령의사육사': {
+        'model': 'best_mob_sogm2.pt',
+        'conf': 0.9,
+        'aim_y': 0,
+        'portrait': 'sogm2.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            20],
+        'avoid_conf': 0.8,
+        'pan_dist': 0.3,
+        'sprite': [
+            'dark_gujimo_keeper_n',
+            'dark_gujimo_keeper_m'],
+        'fire_rect': [
+            0.19,
+            0.58,
+            0.81,
+            0.92],
+        'category': '광려산/환상계곡' },
+    '암령의고주': {
+        'model': 'best_mob_sogm3.pt',
+        'conf': 0.9,
+        'aim_y': 0,
+        'portrait': 'sogm3.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.9,
+            20],
+        'avoid_conf': 0.8,
+        'pan_dist': 0.3,
+        'sprite': [
+            'dark_gujimo_employer_n',
+            'dark_gujimo_employer_m'],
+        'fire_rect': [
+            0.22,
+            0.58,
+            0.78,
+            0.92],
+        'category': '광려산/환상계곡' },
+    '암령의장로': {
+        'model': 'best_mob_sogm4.pt',
+        'conf': 0.9,
+        'aim_y': 0,
+        'portrait': 'sogm4.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.82,
+            28],
+        'avoid_conf': 0.8,
+        'pan_dist': 0.3,
+        'sprite': [
+            'dark_gujimo_elder_n',
+            'dark_gujimo_elder_m'],
+        'fire_rect': [
+            0.19,
+            0.55,
+            0.81,
+            0.95],
+        'category': '광려산/환상계곡' },
+    '두이': {
+        'model': 'best_mob_dui.pt',
+        'conf': 0.85,
+        'aim_y': 0,
+        'portrait': 'dui.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.9,
+            28],
+        'avoid_conf': 0.85,
+        'pan_dist': 0.3,
+        'sprite': [
+            'dui'],
+        'fire_rect': [
+            0.16,
+            0.58,
+            0.84,
+            0.92],
+        'category': '기타' },
+    '궁_교룡': {
+        'projection_scale': [
+            26.7,
+            26.1],
+        'model': 'best_mob_gyo_w.pt',
+        'conf': 0.9,
+        'aim_y': 0,
+        'portrait': 'gyo_w.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'avoid_conf': 0.9,
+        'pan_dist': 0.65,
+        'fire_rect': [
+            0.28,
+            0.58,
+            0.72,
+            0.92],
+        'lead_angle': True,
+        'category': '샴발라(천옥/관문)' },
+    '도사_허': {
+        'model': 'best_mob_dosa_heo.pt',
+        'conf': 0.85,
+        'aim_y': 0,
+        'portrait': 'dosa_heo.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.96,
+            64],
+        'avoid_conf': 0.85,
+        'trust_avoid': True,
+        'pan_dist': 0.35,
+        'sprite': [
+            'master_heo_n',
+            'master_heo_m'],
+        'fire_rect': [
+            0.34,
+            0.85,
+            0.66,
+            1.19],
+        'category': '광려산/환상계곡' },
+    '너구리': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'sprite': [
+            'raccoondog_online'],
+        'category': '기타' },
+    '건달바의혼': {
+        'model': 'best_mob_gun.pt',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'gun.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.9,
+            28],
+        'avoid_conf': 0.8,
+        'sprite': [
+            'gundaba'],
+        'fire_rect': [
+            0.07,
+            0.55,
+            0.93,
+            0.95],
+        'category': '신선곡' },
+    '오운_전': {
+        'model': 'best_mob_oun_jeon.pt',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'oun_jeon.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.9,
+            30],
+        'avoid_conf': 0.9,
+        'sprite': [
+            'lord_koyang_n',
+            'lord_koyang_m'],
+        'fire_rect': [
+            0.19,
+            0.55,
+            0.81,
+            0.95],
+        'category': '기타' },
+    '삼미호': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'sammi.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'sammiho_t'],
+        'fire_rect': [
+            0.28,
+            0.64,
+            0.72,
+            0.86],
+        'category': '신선곡' },
+    '거북궁사': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'tman.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'tuttleman'],
+        'fire_rect': [
+            0.28,
+            0.61,
+            0.72,
+            0.89],
+        'category': '기타',
+        'ignore_dummy': True },
+    '신장_경문': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.6,
+        'portrait': 'gyeongmun_f.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'gyeongmun_f_n',
+            'gyeongmun_f_m'],
+        'boss': True,
+        'boss_conf': 0.55,
+        'fire_rect': [
+            0.28,
+            0.88,
+            0.72,
+            0.98],
+        'category': '샴발라(천옥/관문)',
+        'pan_ratio': 1 },
+    '도사_귀': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_gui.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_gui_n',
+            'master_gui_m'],
+        'fire_rect': [
+            0.19,
+            0.76,
+            0.81,
+            0.98],
+        'category': '광려산/환상계곡' },
+    '도사_각': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_gak.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_gak_n',
+            'master_gak_m'],
+        'fire_rect': [
+            0.31,
+            0.85,
+            0.69,
+            1.13],
+        'category': '광려산/환상계곡' },
+    '도사_삼': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_sam.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_sam_n',
+            'master_sam_m'],
+        'fire_rect': [
+            0.31,
+            0.85,
+            0.69,
+            1.13],
+        'category': '광려산/환상계곡' },
+    '악몽귀': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'acmong.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'acmong_gui_n',
+            'acmong_gui_r'],
+        'fire_rect': [
+            0.22,
+            0.82,
+            0.78,
+            0.98],
+        'category': '악몽(틈/근원)' },
+    '아디티': {
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'aditi.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'aditi'],
+        'fire_rect': [
+            0.25,
+            0.73,
+            0.75,
+            0.95],
+        'category': '신선곡' },
+    '수룡': {
+        'model': 'best_mob_water_dragon.pt',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'water_dragon.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'avoid_conf': 0.7,
+        'fire_rect': [
+            0.4,
+            0.82,
+            0.6,
+            1.1],
+        'category': '기타' },
+    '잠식귀(수)': {
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'jam_w.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'jamsic_w_n',
+            'jamsic_w_m'],
+        'fire_rect': [
+            0.22,
+            0.79,
+            0.78,
+            1.01],
+        'category': '악몽(틈/근원)' },
+    '잠식귀(풍)': {
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'jam_a.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'jamsic_a_n',
+            'jamsic_a_r'],
+        'fire_rect': [
+            0.34,
+            0.7,
+            0.66,
+            0.92],
+        'category': '악몽(틈/근원)' },
+    '잠식귀(화)': {
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'jam_f.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'jamsic_f_n',
+            'jamsic_f_m'],
+        'fire_rect': [
+            0.22,
+            0.64,
+            0.78,
+            0.86],
+        'category': '악몽(틈/근원)' },
+    '잠식귀(뇌)': {
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'jam_t.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'jamsic_t_n',
+            'jamsic_t_r'],
+        'fire_rect': [
+            0.19,
+            0.64,
+            0.81,
+            0.86],
+        'category': '악몽(틈/근원)' },
+    '구지모시녀장': {
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'gusi.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'guzimo_sister'],
+        'fire_rect': [
+            0.25,
+            0.67,
+            0.75,
+            0.95],
+        'category': '기타' },
+    '궁_미후': {
+        'projection_scale': [
+            26.7,
+            26.1],
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.65,
+        'portrait': 'mihu_f.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'mihu_f_n',
+            'mihu_f_m'],
+        'fire_rect': [
+            0.28,
+            0.7,
+            0.72,
+            0.92] },
+    '궁_대호': {
+        'projection_scale': [
+            26.7,
+            26.1],
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.65,
+        'portrait': 'daeho_t.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'daeho_t_n',
+            'daeho_t_m'],
+        'fire_rect': [
+            0.34,
+            0.7,
+            0.66,
+            0.98] },
+    '궁_흉맥': {
+        'projection_scale': [
+            26.7,
+            26.1],
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.65,
+        'portrait': 'hyungmaek_a.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'hyungmaek_a_n',
+            'hyungmaek_a_m'],
+        'fire_rect': [
+            0.34,
+            0.61,
+            0.66,
+            0.89] },
+    '악령_수령': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'ghostsr.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'ghostsr_n',
+            'ghostsr_m'],
+        'fire_rect': [
+            0.31,
+            0.91,
+            0.69,
+            1.07] },
+    '악령_염옥': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'ghostyo.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'ghostyo_n',
+            'ghostyo_m'],
+        'fire_rect': [
+            0.4,
+            0.67,
+            0.6,
+            0.77] },
+    '구지모사역술사': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.3,
+        'portrait': 'gusa.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'gujimo_spiritualist_n',
+            'gujimo_spiritualist_r'],
+        'fire_rect': [
+            0.25,
+            0.52,
+            0.75,
+            0.68] },
+    '연옥동자': {
+        'category': '신선곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'yeonok.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'devilfirem_s'],
+        'fire_rect': [
+            0.31,
+            0.82,
+            0.69,
+            1.1] },
+    '마후라가의혼': {
+        'category': '신선곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'mahu.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'mahuraga'],
+        'fire_rect': [
+            0.28,
+            0.88,
+            0.72,
+            1.04] },
+    '누에': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'nue.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'nue'],
+        'fire_rect': [
+            0.37,
+            0.67,
+            0.63,
+            0.83] },
+    '석사자': {
+        'category': '기타',
+        'model': 'best_mob_stone_l.pt',
+        'conf': 0.85,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'suksa.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'fire_rect': [
+            0.16,
+            0.64,
+            0.84,
+            0.92] },
+    '기': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'kui.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'kui'],
+        'fire_rect': [
+            0.34,
+            0.76,
+            0.66,
+            0.98] },
+    '염라대왕': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'hellking.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'hellking'],
+        'fire_rect': [
+            0.22,
+            0.76,
+            0.78,
+            0.92] },
+    '유물지도': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'ruins_guardian_n',
+            'ruins_guardian_m'],
+        'fire_rect': [
+            0.31,
+            0.67,
+            0.69,
+            0.95],
+        'box_click': True,
+        'ignore_weight': True,
+        'ignore_teleport': True,
+        'ignore_dummy': True,
+        'portrait': 'yumul.PNG' },
+    '유물지도(정예)': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': -20,
+        'pan_dist': 0.4,
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'elite_ruins_guardian_n',
+            'elite_ruins_guardian_m'],
+        'fire_rect': [
+            0.34,
+            0.76,
+            0.66,
+            0.98],
+        'box_click': True,
+        'ignore_weight': True,
+        'ignore_teleport': True,
+        'ignore_dummy': True,
+        'portrait': 'yumul_e.PNG' },
+    '늪지이무기': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'swamphydra.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'swamphydra'] },
+    '귀_염우': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.55,
+        'portrait': 'fiend_thunder.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'thunder_fiend_n',
+            'thunder_fiend_m'],
+        'fire_rect': [
+            0.43,
+            0.73,
+            0.57,
+            0.83],
+        'pan_ratio': 1 },
+    '신장_사문': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.6,
+        'portrait': 'samun.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'samun_t_n',
+            'samun_t_m'],
+        'fire_rect': [
+            0.34,
+            0.82,
+            0.66,
+            0.98],
+        'pan_ratio': 1 },
+    '공작원_다령': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dr_op.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'operative_dr_n',
+            'operative_dr_m'],
+        'fire_rect': [
+            0.34,
+            0.64,
+            0.66,
+            0.86] },
+    '현진_장로': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'hj_elder.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'hj_elder_n',
+            'hj_elder_m'],
+        'fire_rect': [
+            0.37,
+            0.67,
+            0.63,
+            0.89] },
+    '벼락의 사령술사': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'bss.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'lightning_magicofflcer_n',
+            'lightning_magicofflcer_m'],
+        'fire_rect': [
+            0.28,
+            0.64,
+            0.72,
+            0.86] },
+    '궁_사수': {
+        'projection_scale': [
+            26.7,
+            26.1],
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.65,
+        'portrait': 'sasu.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'sasu_t_n',
+            'sasu_t_m'],
+        'fire_rect': [
+            0.34,
+            0.61,
+            0.66,
+            0.83] },
+    '복수자_샤오링': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'r_sha.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'revenger_shaoring_n',
+            'revenger_shaoring_m'],
+        'fire_rect': [
+            0.28,
+            0.79,
+            0.72,
+            0.95] },
+    '루드라의혼': {
+        'category': '신선곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'rudra.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'rudra'],
+        'fire_rect': [
+            0.28,
+            0.55,
+            0.72,
+            0.77] },
+    '백면구미호': {
+        'category': '신선곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'bg.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'ninetailedfox_s_n',
+            'ninetailedfox_s_r'],
+        'fire_rect': [
+            0.34,
+            0.73,
+            0.66,
+            0.89] },
+    '귀_투적': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.55,
+        'portrait': 'fiend_crimson.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'pan_ratio': 1,
+        'sprite': [
+            'crimson_fiend_n',
+            'crimson_fiend_m'],
+        'fire_rect': [
+            0.34,
+            0.82,
+            0.66,
+            1.04] },
+    '지식의고룡': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.75,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'know.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'knowledged_n',
+            'knowledged_m'],
+        'fire_rect': [
+            0.34,
+            0.73,
+            0.66,
+            0.89] },
+    '실험체발로': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.75,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'balo.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'subject_balro_n',
+            'subject_balro_r'],
+        'fire_rect': [
+            0.34,
+            0.7,
+            0.66,
+            0.98] },
+    '욕수의사념': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'yoksu.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'yoksu'],
+        'fire_rect': [
+            0.25,
+            0.85,
+            0.75,
+            1.07] },
+    '도사_저': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_jeo.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_jeo_n',
+            'master_jeo_m'],
+        'fire_rect': [
+            0.34,
+            0.73,
+            0.66,
+            0.95] },
+    '오운_태': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'oun_tae.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'lord_bokhee_n',
+            'lord_bokhee_m'],
+        'fire_rect': [
+            0.4,
+            0.7,
+            0.6,
+            0.8] },
+    '도사_성': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_sung.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_sung_n',
+            'master_sung_m'],
+        'fire_rect': [
+            0.37,
+            0.85,
+            0.63,
+            1.13] },
+    '신장_휴문': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.6,
+        'portrait': 'hyumun.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'hyumun_t_n',
+            'hyumun_t_m'],
+        'fire_rect': [
+            0.37,
+            0.79,
+            0.63,
+            1.01],
+        'pan_ratio': 1 },
+    '신장_생문': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.9,
+        'aim_y': 0,
+        'pan_dist': 0.6,
+        'portrait': 'saengmun.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'pan_ratio': 1,
+        'sprite': [
+            'saengmun_a_n',
+            'saengmun_a_m'],
+        'fire_rect': [
+            0.34,
+            0.79,
+            0.66,
+            1.01] },
+    '악몽지기': {
+        'category': '악몽(틈/근원)',
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'acmonggui.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'dark_guardian_n',
+            'dark_guardian_r'],
+        'fire_rect': [
+            0.37,
+            0.7,
+            0.63,
+            0.92] },
+    '도사_필': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_pil.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_pil_n',
+            'master_pil_m'],
+        'fire_rect': [
+            0.34,
+            0.79,
+            0.66,
+            1.01] },
+    '악령_전이': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'ghostjy.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'ghostjy_n',
+            'ghostjy_m'],
+        'fire_rect': [
+            0.34,
+            0.64,
+            0.66,
+            0.86] },
+    '도사_여': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'dosa_yeo.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'master_yeo_n',
+            'master_yeo_m'],
+        'fire_rect': [
+            0.28,
+            0.58,
+            0.72,
+            0.8] },
+    '제사장_허독': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'fo_hd.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'pontifex_hd_n',
+            'pontifex_hd_m'],
+        'fire_rect': [
+            0.34,
+            0.64,
+            0.66,
+            0.86] },
+    '천옥_천망수': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.8,
+        'aim_y': 0,
+        'pan_dist': 0.65,
+        'portrait': 'cheonmang.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'cheonmang_n',
+            'cheonmang_m'],
+        'fire_rect': [
+            0.28,
+            0.88,
+            0.72,
+            1.1],
+        'projection_scale': [
+            26,
+            26] },
+    '악령_풍마': {
+        'category': '광려산/환상계곡',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'ghostpm.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'ghostpm_n',
+            'ghostpm_m'],
+        'fire_rect': [
+            0.34,
+            0.64,
+            0.66,
+            0.8] },
+    '천옥_집행수': {
+        'category': '샴발라(천옥/관문)',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.65,
+        'portrait': 'jiphaeng.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'jiphaeng_n',
+            'jiphaeng_m'],
+        'fire_rect': [
+            0.22,
+            0.64,
+            0.78,
+            0.98],
+        'projection_scale': [
+            26,
+            26] },
+    '오운_소': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'oun_so.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'lord_kumchun_n',
+            'lord_kumchun_m'],
+        'fire_rect': [
+            0.31,
+            0.67,
+            0.69,
+            0.95] },
+    '오운_염': {
+        'category': '기타',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.4,
+        'portrait': 'oun_yum.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'lord_shinnong_n',
+            'lord_shinnong_m'],
+        'fire_rect': [
+            0.25,
+            0.67,
+            0.75,
+            0.95] },
+    '백안귀': {
+        'category': '신선곡',
+        'model': '',
+        'conf': 0.7,
+        'aim_y': 0,
+        'pan_dist': 0.35,
+        'portrait': 'devileyes.PNG',
+        'fire_filter': True,
+        'fire_roi': [
+            0.5,
+            0.8,
+            28],
+        'sprite': [
+            'devileyes_s'],
+        'fire_rect': [
+            0.19,
+            0.61,
+            0.81,
+            0.89] } }
+DEFAULT_MONSTER_CFG = {
+    'squad_counts': [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2],
+    'center_move_delay': 1,
+    'lead_px': 80,
+    'summon_mode': 'none',
+    'use_summon': False,
+    'multi_retreat': False,
+    'noejeonju': False,
+    'attack_keys': [
+        '3',
+        '4',
+        '5',
+        '6'],
+    'travel_mode': 'none',
+    'travel_scroll_item': '',
+    'travel_waypoints': [] }
+DEFAULT_COMMON = {
+    'second_password': '',
+    'auto_restock_enabled': False,
+    'food_item': '삼색채경단',
+    'battle_modes': True,
+    'prefight_food': True,
+    'prefight_revive': True,
+    'food_buy_qty': 200,
+    'cleanup_sell_items': '',
+    'cleanup_keep_items': '',
+    'gm_chat_msg': '',
+    'discord_webhook': '',
+    'discord_token': '',
+    'discord_channel': '',
+    'ntfy_url': '',
+    'link_enabled': True,
+    'link_topic': '',
+    'link_token': '',
+    'ngrok_authtoken': '',
+    'notify_whisper': True,
+    'notify_normal': False,
+    'notify_repeat': False,
+    'banja_mode': False,
+    'win_w': 960,
+    'win_h': 660,
+    'sched_cycles': 3,
+    'sched_battles': 10,
+    'sched_rest_sec': 600 }
+
+def _mob(monster: str) -> dict:
+    return MOB_CATALOG.get(monster) or MOB_CATALOG[DEFAULT_MONSTER]
+
+
+def mob_model_path(monster: str) -> str:
+    m = _mob(monster)
+    return os.path.join(MODEL_DIR, m['model']) if m.get('model') else ''
+
+
+def battle_model_path(monster: str) -> str:
+    m = _mob(monster)
+    return os.path.join(MODEL_DIR, m['battle']) if m.get('battle') else ''
+
+
+def mob_conf(monster: str) -> float:
+    return float(_mob(monster)['conf'])
+
+
+def battle_conf(monster: str) -> float:
+    return float(_mob(monster)['battle_conf'])
+
+
+def mob_aim_y(monster: str) -> float:
+    return float(_mob(monster)['aim_y'])
+
+
+def mob_aim_y4(monster: str):
+    v = _mob(monster).get('aim_y4')
+    return [float(x) for x in v] if v else None
+
+
+def mob_fire_roi(monster: str):
+    m = _mob(monster)
+    if not m.get('fire_filter', True):
+        return None
+    return tuple(m.get('fire_roi', [
+        0.5,
+        0.8,
+        28]))
+
+
+def mob_sprite(monster: str):
+    s = _mob(monster).get('sprite')
+    return s or None
+
+
+
+def mob_fire_rect(monster: str):
+    m = _mob(monster)
+    r = m.get('fire_rect')
+    if r:
+        return tuple((float(v) for v in r))
+    t = m.get('fire_top')
+    if t:
+        return (-0.08, float(t), 1.08, 1.1)
+
+
+def mob_gate_scale(monster: str):
+    v = _mob(monster).get('gate_scale')
+    return float(v) if v else None
+
+
+def mob_avoid_conf(monster: str):
+    v = _mob(monster).get('avoid_conf')
+    return float(v) if v else None
+
+
+def mob_pan_dist(monster: str) -> float:
+    return float(_mob(monster).get('pan_dist', 0.4))
+
+
+def mob_projection_scale(monster: str):
+    return _mob(monster).get('projection_scale')
+
+
+def mob_pan_ratio(monster: str):
+    v = _mob(monster).get('pan_ratio')
+    return float(v) if v else None
+
+    return float(v)
+
+
+def mob_lead_angle(monster: str) -> bool:
+    return bool(_mob(monster).get('lead_angle', False))
+
+
+def mob_boss(monster: str) -> bool:
+    return bool(_mob(monster).get('boss', False))
+
+
+def mob_ignore_dummy(monster: str) -> bool:
+    return bool(_mob(monster).get('ignore_dummy', False))
+
+
+def mob_summon_center(monster: str) -> bool:
+    return bool(_mob(monster).get('summon_center', False))
+
+
+def mob_boss_conf(monster: str) -> float:
+    v = _mob(monster).get('boss_conf')
+    return float(v) if v else None
+
+
+def mob_trust_avoid(monster: str):
+    v = _mob(monster).get('trust_avoid')
+    return bool(v) if v else None
+
+
+def mob_ignore_weight(monster: str) -> bool:
+    return bool(_mob(monster).get('ignore_weight', False))
+
+
+def mob_ignore_teleport(monster: str) -> bool:
+    return bool(_mob(monster).get('ignore_teleport', False))
+
+
+def mob_box_click(monster: str) -> bool:
+    return bool(_mob(monster).get('box_click', False))
+
+
+def mob_pixel_detect(monster: str) -> bool:
+    return _mob(monster).get('detect', '') == 'pixel'
+
+
+def mob_travel_mode(monster: str) -> str:
+    return load()['monsters'].get(monster, {}).get('travel_mode', 'none')
+
+
+def mob_travel_scroll_item(monster: str) -> str:
+    return load()['monsters'].get(monster, {}).get('travel_scroll_item', '')
+
+
+def mob_travel_waypoints(monster: str) -> list:
+    return load()['monsters'].get(monster, {}).get('travel_waypoints', [])
+
+
+def auto_restock_enabled() -> bool:
+    return bool(load().get('auto_restock_enabled', False))
+
+
+def food_item() -> str:
+    return load().get('food_item', '삼색채경단')
+
+
+def food_buy_qty() -> int:
+    return int(load().get('food_buy_qty', 200))
+
+
+def cleanup_sell_items() -> str:
+    return load().get('cleanup_sell_items', '')
+
+
+def cleanup_keep_items() -> str:
+    return load().get('cleanup_keep_items', '')
+
+
+def second_password() -> str:
+    return load().get('second_password', '')
+
+
+def portrait_path(monster: str) -> str:
+    m = MOB_CATALOG.get(monster)
+    f = m.get('portrait') if m else ''
+    return os.path.join(PORTRAIT_DIR, f) if f else ''
+
+SUMMON_MODES = ('none', 'taunt', 'non_taunt')
+
+def summon_mode(settings: dict) -> str:
+    mode = settings.get('summon_mode')
+    if isinstance(mode, str) and mode in SUMMON_MODES:
+        return mode
+    return 'taunt' if settings.get('use_summon') is True else 'none'
+
+
+def _sync_summon_mode(settings: dict):
+    mode = summon_mode(settings)
+    settings['summon_mode'] = mode
+    settings['use_summon'] = mode != 'none'
+
+
+def _load_raw() -> dict:
+    
+    try:
+        with open(SETTINGS_PATH, encoding = 'utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+_cache_lock = threading.Lock()
+_cache: 'dict | None' = None
+_cache_mtime: 'float | None' = None
+
+def _settings_mtime():
+    
+    try:
+        return os.path.getmtime(SETTINGS_PATH)
+    except OSError:
+        return None
+
+
+
+def load() -> dict:
+    global _cache, _cache_mtime
+    mt = _settings_mtime()
+    with _cache_lock:
+        if _cache and mt and mt == _cache_mtime:
+            return copy.deepcopy(_cache)
+    s = _load_raw() or {}
+    monsters = s.setdefault('monsters', { })
+    for name in MOB_CATALOG:
+        monsters.setdefault(name, dict(DEFAULT_MONSTER_CFG))
+    for mc in monsters.values():
+        _sync_summon_mode(mc)
+        for k, v in DEFAULT_MONSTER_CFG.items():
+            mc.setdefault(k, v)
+    s['monsters'] = dict(sorted(monsters.items()))
+    for k, v in DEFAULT_COMMON.items():
+        s.setdefault(k, v)
+    if s.get('current_monster') not in MOB_CATALOG:
+        s['current_monster'] = DEFAULT_MONSTER
+    with _cache_lock:
+        _cache = copy.deepcopy(s)
+        _cache_mtime = mt
+    return s
+
+
+def save(s: dict) -> bool:
+    global _cache, _cache_mtime
+    tmp = None
+    
+    try:
+        saved = copy.deepcopy(s)
+        for mc in saved.get('monsters', { }).values():
+            _sync_summon_mode(mc)
+        data = json.dumps(saved, ensure_ascii = False, indent = 2)
+        with _cache_lock:
+            with tempfile.NamedTemporaryFile(mode = 'w', encoding = 'utf-8', dir = os.path.dirname(SETTINGS_PATH), prefix = '.prism_settings_', suffix = '.tmp', delete = False) as f:
+                tmp = f.name
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, SETTINGS_PATH)
+            tmp = None
+            _cache = saved
+            _cache_mtime = _settings_mtime()
+        if tmp:
+            
+            try:
+                os.remove(tmp)
+                return True
+            except OSError:
+                return True
+
+        return True
+    except Exception as e:
+        logging.getLogger(__name__).warning('설정 저장 실패 (기존 설정 유지): %s', e)
+        
+        try:
+            if tmp:
+                
+                try:
+                    os.remove(tmp)
+                    return False
+                except OSError:
+                    return False
+
+            return False
+        except:
+            if tmp:
+                os.remove(tmp)
+
+
+
+
+def parse_squad_counts(sc) -> list:
+    if isinstance(sc, list) and len(sc) == 6:
+        
+        try:
+            return [ max(0, float(v)) for v in sc ]
+        except Exception:
+            pass
+
+    return list(DEFAULT_MONSTER_CFG['squad_counts'])
+
+
+class SettingsError(ValueError):
+    pass
+
+
+def _v_num(low, high):
+    
+    def rule(value, label):
+        if isinstance(value, bool):
+            raise SettingsError(f'''{label}: 숫자를 입력하세요''')
+        
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            raise SettingsError(f'''{label}: 숫자를 입력하세요''')
+
+        if not (math.isfinite(out) and low <= out <= high):
+            raise SettingsError(f'''{label}: {low:g}~{high:g} 범위여야 합니다''')
+        return out
+
+    return rule
+
+
+def _v_bool(value, label):
+    if not isinstance(value, bool):
+        raise SettingsError(f'''{label}: 참/거짓 값이 필요합니다''')
+    return value
+
+
+def _v_summon_mode(value, label):
+    if not isinstance(value, str) or value not in SUMMON_MODES:
+        raise SettingsError(f'''{label}: 소환 사용 안 함 / 도발 탱 소환 / 비도발 탱 소환 중 선택하세요''')
+    return value
+
+
+def _v_squad(value, label):
+    if not isinstance(value, list) or len(value) != 6:
+        raise SettingsError(f'''{label}: 부대 1~6 값 6개가 필요합니다''')
+    num = _v_num(0, 60)
+    return [ num(v, label) for v in value ]
+
+
+def _v_attack_keys(value, label):
+    import combat
+    return combat.normalize_attack_keys(value)
+
+
+def _v_text(value, label):
+    if value is None:
+        value = ''
+    return str(value).strip()
+
+
+def _v_int(low, high):
+    num = _v_num(low, high)
+    
+    def rule(value, label):
+        return int(round(num(value, label)))
+
+    return rule
+
+
+def _v_choice(options):
+    def rule(value, label):
+        if value not in options:
+            raise SettingsError(f'''{label}: {' / '.join(options)} 중 선택하세요''')
+        return value
+
+    return rule
+
+
+def _v_waypoints(value, label):
+    if not isinstance(value, list):
+        raise SettingsError(f'''{label}: 기록된 경로 목록이어야 합니다''')
+    out = []
+    for step in value:
+        if not isinstance(step, dict) or 'x' not in step or 'y' not in step:
+            raise SettingsError(f'''{label}: 각 단계는 x, y 좌표가 필요합니다''')
+        out.append({
+            'x': int(step['x']),
+            'y': int(step['y']),
+            'wait': float(step.get('wait', 0.0))})
+    return out
+
+
+MONSTER_CFG_RULES = {
+    'squad_counts': ('부대별 타격 시간', _v_squad),
+    'center_move_delay': ('중앙 이동 대기', _v_num(0, 10)),
+    'lead_px': ('선보정', _v_num(0, 300)),
+    'summon_mode': ('소환 방식', _v_summon_mode),
+    'use_summon': ('소환 사용', _v_bool),
+    'multi_retreat': ('다부대 퇴각', _v_bool),
+    'noejeonju': ('뇌전주', _v_bool),
+    'attack_keys': ('사용 격수', _v_attack_keys),
+    'travel_mode': ('이동 방식', _v_choice(['none', 'walk', '육의전', '무투장', 'scroll'])),
+    'travel_scroll_item': ('이동 주문서', _v_text),
+    'travel_waypoints': ('기록된 이동 경로', _v_waypoints) }
+COMMON_RULES = {
+    'second_password': ('2차 비밀번호', _v_text),
+    'auto_restock_enabled': ('자동 보충 사용', _v_bool),
+    'food_item': ('구매할 음식', _v_text),
+    'battle_modes': ('전투 시작 시 전투모드·거래차단 자동 켜기', _v_bool),
+    'prefight_food': ('전투 전 포만감 1/5 미만이면 궁중 타락죽으로 채우기', _v_bool),
+    'prefight_revive': ('전투 전 죽은 용병 있으면 Alt+1, Alt+2로 부활', _v_bool),
+    'food_buy_qty': ('음식 구매 수량', _v_int(0, 99999)),
+    'cleanup_sell_items': ('정리(판매)할 아이템', _v_text),
+    'cleanup_keep_items': ('보관할 아이템(판매 제외)', _v_text),
+    'gm_chat_msg': ('영자 응답 문구', _v_text),
+    'discord_webhook': ('디스코드 웹훅', _v_text),
+    'discord_token': ('디스코드 토큰', _v_text),
+    'discord_channel': ('디스코드 채널', _v_text),
+    'ntfy_url': ('ntfy URL', _v_text),
+    'link_enabled': ('맥 링크 사용', _v_bool),
+    'link_topic': ('맥 링크 주제', _v_text),
+    'link_token': ('맥 링크 토큰', _v_text),
+    'ngrok_authtoken': ('ngrok 토큰', _v_text),
+    'notify_whisper': ('귓말 알림', _v_bool),
+    'notify_normal': ('일반 채팅 알림', _v_bool),
+    'notify_repeat': ('반복 채팅 알림', _v_bool),
+    'banja_mode': ('반자사', _v_bool),
+    'win_w': ('창 폭', _v_int(200, 10000)),
+    'win_h': ('창 높이', _v_int(200, 10000)),
+    'sched_cycles': ('스케쥴 사이클', _v_int(1, 999)),
+    'sched_battles': ('사이클당 전투', _v_int(1, 9999)),
+    'sched_rest_sec': ('휴식 시간', _v_int(0, 86400)) }
+
+def _warn_missing_rules():
+    log = logging.getLogger(__name__)
+    for what, defaults, rules in (('몹 전투설정', DEFAULT_MONSTER_CFG, MONSTER_CFG_RULES), ('공통 설정', DEFAULT_COMMON, COMMON_RULES)):
+        missing = set(defaults) - set(rules)
+        if missing:
+            log.warning('%s 검증 규칙 누락: %s (값은 보존하되 검증 안 함)', what, ', '.join(sorted(missing)))
+
+_warn_missing_rules()
+
+def _validate(raw, defaults, rules, base, what):
+    if not isinstance(raw, dict):
+        raise SettingsError(f'''{what} 형식이 올바르지 않습니다''')
+    unknown = set(raw) - set(defaults)
+    if unknown:
+        raise SettingsError(f'''알 수 없는 {what}: ''' + ', '.join(sorted(unknown)))
+    merged = dict(defaults)
+    if isinstance(base, dict):
+        merged.update({ k: v for k, v in base.items() if k in defaults })
+    merged.update(raw)
+    out = { }
+    for key, default in defaults.items():
+        rule = rules.get(key)
+        value = merged.get(key, default)
+        if rule:
+            value = rule[1](value, rule[0])
+        out[key] = copy.deepcopy(value)
+    return out
+
+
+def validate_monster_cfg(raw, base = None) -> dict:
+    if isinstance(base, dict):
+        base = dict(base)
+        base['summon_mode'] = summon_mode(base)
+    if isinstance(raw, dict) and 'summon_mode' not in raw and 'use_summon' in raw:
+        raw = dict(raw)
+        raw['summon_mode'] = 'taunt' if raw['use_summon'] is True else 'none'
+    out = _validate(raw, DEFAULT_MONSTER_CFG, MONSTER_CFG_RULES, base, '전투 설정')
+    _sync_summon_mode(out)
+    return out
+
+
+def validate_common(raw, base = None) -> dict:
+    return _validate(raw, DEFAULT_COMMON, COMMON_RULES, base, '공통 설정')
+
+STAMP_EXCLUDE = {
+    'stamp',
+    'win_h',
+    'win_w',
+    'auth_id',
+    'second_password',
+    'sched_cycles',
+    'sched_battles',
+    'sched_rest_sec'}
+
+def settings_stamp(s: dict | None = None) -> str:
+    if s is None:
+        s = load()
+    view = { k: v for k, v in s.items() if k not in STAMP_EXCLUDE }
+    blob = json.dumps(view, ensure_ascii = False, sort_keys = True, default = str)
+    return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:12]
+
+
+===== run_gato.py (    8860 bytes) =====
+"""GATO launcher — preflight checks, then hand off to prism.main().
+
+Windows entry point. Keep thin: everything here is fail-fast preflight; the
+actual bot logic lives in prism.
+"""
+import os
+import sys
+
+GAME_EXE = "gersang.exe"
+MIN_PY = (3, 11)
+
+
+def _fail(msg: str) -> None:
+    print("ERROR: " + msg)
+    if os.name == "nt":
+        # The packaged app has no console: show the reason instead of exiting silently.
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, msg, "GATO", 0x10)
+        except Exception:
+            pass
+    sys.exit(1)
+
+
+def _check_python() -> None:
+    if sys.version_info[:2] < MIN_PY:
+        _fail(
+            "Python %d.%d is too old. This program needs Python %d.%d or newer "
+            "(install Python 3.11 64-bit)." % (*sys.version_info[:2], *MIN_PY)
+        )
+    if os.name != "nt":
+        print("WARNING: this program is Windows-only; continuing for testing.")
+
+
+def _check_admin() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception as e:  # pragma: no cover - Windows only
+        print(f"WARNING: could not check administrator rights ({e}).")
+        return
+    if not is_admin:
+        _fail(
+            "Administrator rights are required (the bot sends keyboard/mouse "
+            "input and reads other processes). Right-click and choose "
+            "'Run as administrator'."
+        )
+
+
+def _check_game_window() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import psutil
+
+        found = [p for p in psutil.process_iter(["name"]) if (p.info.get("name") or "").lower() == GAME_EXE]
+    except Exception as e:
+        print(f"WARNING: could not scan running processes ({e}).")
+        return
+    if not found:
+        _fail(
+            f"The game window was not found. Start the game ('{GAME_EXE}') "
+            "before starting the bot."
+        )
+
+
+# 거상 only ships 3 fixed windowed-mode resolutions, all 4:3 (confirmed from the
+# game's own patch notes): 1024x768 (reference), 1280x960, 1440x1080. Every
+# captured frame is scaled to the 1024x768 reference before any pixel/trigger
+# check runs, so all three are safe automatically (pure uniform scale, same
+# aspect ratio). Fullscreen "화면 맞춤" (fit-to-screen) stretches the content to
+# the monitor's real aspect (usually 16:9), which breaks every pixel
+# coordinate in this bot silently. Catch that here instead of misclicking.
+SUPPORTED_RESOLUTIONS = ((1024, 768), (1280, 960), (1440, 1080))
+
+
+def _check_game_resolution() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import win32con
+        import win32gui
+
+        import capture  # noqa: PLC0415
+
+        hwnd = capture.find_window()
+        if not hwnd:
+            return  # already covered by _check_game_window
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        w, h = right - left, bottom - top
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+        is_popup_fullscreen = bool(style & win32con.WS_POPUP) and not bool(style & win32con.WS_CAPTION)
+    except Exception as e:
+        print(f"WARNING: could not check game resolution ({e}).")
+        return
+    if is_popup_fullscreen:
+        _fail(
+            "The game is in fullscreen mode. This bot only works in windowed "
+            "mode (ESC -> 일반 설정 -> 화면 설정 -> 게임 화면 방식 -> 창 모드), because "
+            "fullscreen stretches the image and every button location would be "
+            "wrong."
+        )
+    if (w, h) not in SUPPORTED_RESOLUTIONS:
+        _fail(
+            f"The game window is {w}x{h}, not one of the 3 supported sizes "
+            f"{SUPPORTED_RESOLUTIONS}. In the game: ESC -> 일반 설정 -> 화면 설정 -> "
+            "해상도 설정, pick 1024x768, 1280x960 or 1440x1080 (창 모드 only)."
+        )
+
+
+def _check_assets() -> None:
+    try:
+        import config  # noqa: PLC0415
+
+        paths = set()
+        for name in dir(config):
+            v = getattr(config, name)
+            if isinstance(v, str) and (os.sep in v or "/" in v) and any(
+                v.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".bmp", ".onnx", ".pt", ".json")
+            ):
+                paths.add(v)
+        missing = [p for p in sorted(paths) if not os.path.exists(p)]
+        if missing:
+            _fail("Missing data files (re-copy the program folder intact): " + ", ".join(missing[:10]))
+    except ImportError as e:
+        _fail(f"Could not load config.py ({e}); the program folder looks incomplete.")
+    except Exception as e:
+        print(f"WARNING: asset check skipped ({e}).")
+
+
+def _seed_settings() -> None:
+    """First run: copy settings.default.json -> prism_settings.json (never overwrite)."""
+    import shutil
+
+    import config
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    live = os.path.join(config.BASE_DIR, "prism_settings.json")
+    default = os.path.join(here, "settings.default.json")
+    if not os.path.exists(live) and os.path.exists(default):
+        shutil.copyfile(default, live)
+        print("First run: created prism_settings.json from defaults.")
+
+
+def _selftest() -> int:
+    """`Gato.exe --selftest`: import every heavy dependency and run one model inference, write
+    selftest.txt next to the app, exit 0/1. Proves a packaged build is complete without the GUI."""
+    import time
+    import traceback
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    # Log next to the exe so the build step can always read it; fall back to the user dir if the
+    # program directory happens to be read-only. Written incrementally so a hard crash still leaves
+    # evidence of how far the run got.
+    log_path = os.path.join(here, "selftest.txt")
+    try:
+        open(log_path, "a", encoding="utf-8").close()
+    except OSError:
+        import config as _c
+
+        log_path = os.path.join(_c.BASE_DIR, "selftest.txt")
+    log = open(log_path, "w", encoding="utf-8")
+
+    out = []
+    ok = True
+
+    def emit(line):
+        out.append(line)
+        log.write(line + "\n")
+        log.flush()
+
+    def step(name, fn):
+        nonlocal ok
+        t0 = time.time()
+        try:
+            r = fn()
+            emit("PASS %-22s %.1fs %s" % (name, time.time() - t0, r if r is not None else ""))
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            emit("FAIL %-22s %s: %s" % (name, type(e).__name__, e))
+            emit(traceback.format_exc(limit=3).rstrip())
+
+    emit("START %s %s" % (sys.version.split()[0], sys.executable))
+    step("frozen", lambda: "yes" if getattr(sys, "frozen", False) else "no (running from source)")
+    for mod in ("numpy", "cv2", "torch", "torchvision", "ultralytics", "win32gui", "win32api", "webview",
+                "windows_capture", "psutil", "scapy.all", "websockets", "cryptography"):
+        step("import " + mod, lambda m=mod: __import__(m) and None)
+    for mod in ("config", "vision", "detector", "capture", "input", "combat", "brain", "prism"):
+        step("module " + mod, lambda m=mod: __import__(m) and None)
+
+    def _yolo():
+        import numpy as np
+        from ultralytics import YOLO
+
+        path = os.path.join(here, "assets", "models", "jochul", "jochul.pt")
+        m = YOLO(path)
+        m.predict(source=np.zeros((512, 512, 3), dtype=np.uint8), imgsz=512, verbose=False)
+        return os.path.basename(path)
+
+    step("yolo model + predict", _yolo)
+
+    def _assets():
+        import config
+
+        missing = [p for p in (config.JOCHUL_MODEL, config.TEXT_MODEL) if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError(", ".join(missing))
+        return "models present"
+
+    step("assets", _assets)
+    step("ui", lambda: os.path.getsize(os.path.join(here, "ui", "index.html")))
+    emit("RESULT " + ("ALL PASS" if ok else "FAILED"))
+    log.close()
+    return 0 if ok else 1
+
+
+def main() -> None:
+    if "--selftest" in sys.argv:
+        try:
+            code = _selftest()
+        except Exception:  # noqa: BLE001
+            import traceback
+
+            sys.stderr.write(traceback.format_exc())
+            code = 1
+        sys.exit(code)
+    print("GATO launcher: running preflight checks...")
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    _seed_settings()
+    _check_python()
+    _check_admin()
+    _check_game_window()
+    _check_game_resolution()
+    _check_assets()
+    print("Preflight OK. Starting bot UI...")
+    try:
+        import prism
+    except ModuleNotFoundError as e:
+        _fail(
+            "A required package is missing: '%s'. Run: py -3.11 -m pip install "
+            "-r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu" % e.name
+        )
+
+    prism.main()
+
+
+if __name__ == "__main__":
+    main()
+===== dev/test_jochul_decode.py (    2289 bytes) =====
+"""조철 swap-sequence decoder: regression test against simulated shuffles.
+
+The decompiled source counted an undecided block (None) as a rule violation, which the original
+bytecode does not. With dropped detections that picked the wrong timing phase and produced wrong
+swaps. These cases failed before the fix.   python dev/test_jochul_decode.py
+"""
+import os
+import random
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import jochul  # noqa: E402
+
+
+def sim(rnd, noise, drop, period=13.0, n_ops=15):
+    ops, last = [], None
+    for _ in range(n_ops):
+        while True:
+            a, b = sorted(rnd.sample(range(1, 6), 2))
+            if last is None or not ({a, b} & set(last)):
+                break
+        ops.append((a, b))
+        last = (a, b)
+    n = int(period * n_ops) + 4
+    pf = [None] * n
+    for i, (a, b) in enumerate(ops):
+        for f in range(int(round(period * i + 1)), min(n, int(round(period * (i + 1))))):
+            u = rnd.random()
+            if u < drop:
+                continue
+            pf[f] = tuple(sorted(rnd.sample(range(1, 6), 2))) if u < drop + noise else (a, b)
+    return ops, pf
+
+
+fails = []
+
+
+def check(name, cond, extra=''):
+    print(('PASS ' if cond else 'FAIL ') + name + ('' if cond else ' -- ' + str(extra)))
+    if not cond:
+        fails.append(name)
+
+
+rnd = random.Random(1)
+cases = []
+for t in range(500):
+    noise, drop = rnd.choice([0, .05, .15]), rnd.choice([0, .2, .4])
+    cases.append((t, noise, drop) + sim(rnd, noise, drop))
+byid = {c[0]: c for c in cases}
+for t in (30, 473):   # decoded wrongly by the decompiled version
+    _, _, _, ops, pf = byid[t]
+    check('case %d decodes to the true swaps' % t, jochul.periodic_decode(pf) == ops)
+
+ok = sum(jochul.periodic_decode(pf) == ops for _, _, _, ops, pf in cases)
+check('exact decode >= 99%% of 500 simulated shuffles (%d)' % ok, ok >= 495, ok)
+ok_hard = [jochul.periodic_decode(pf) == ops for _, n, d, ops, pf in cases if d >= .4 or n >= .15]
+check('hard cases (40%% frames lost / 15%% wrong) >= 98%% (%d/%d)' % (sum(ok_hard), len(ok_hard)), sum(ok_hard) >= 0.98 * len(ok_hard))
+check('empty input -> []', jochul.periodic_decode([]) == [])
+print('FAILED: %s' % fails if fails else 'all passed')
+sys.exit(1 if fails else 0)

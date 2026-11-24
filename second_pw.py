@@ -70,6 +70,8 @@ def find_anchor(frame, log=print):
         return None
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     tmpl = cv2.imread(ANCHOR_TEMPLATE_PATH, cv2.IMREAD_GRAYSCALE)
+    if tmpl is not None and tmpl.ndim == 3:   # cv2 5.0 returns (h, w, 1)
+        tmpl = tmpl[:, :, 0]
     if tmpl is None:
         log('[2차비번] anchor_box.png 템플릿 없음 — 중단')
         return None
@@ -90,6 +92,8 @@ def _load_templates() -> dict:
         if fname.startswith('key_') and fname.endswith('.png'):
             label = fname[len('key_'):-len('.png')]
             img = cv2.imread(os.path.join(ASSET_DIR, fname), cv2.IMREAD_GRAYSCALE)
+            if img is not None and img.ndim == 3:   # cv2 5.0 returns (h, w, 1)
+                img = img[:, :, 0]
             if img is not None:
                 out[label] = img
     return out

@@ -1,0 +1,218 @@
+Looking in indexes: https://pypi.org/simple, https://download.pytorch.org/whl/cpu
+Requirement already satisfied: pyinstaller in c:\python\lib\site-packages (6.8.0)
+Collecting numpy==2.4.4 (from -r /src/requirements.txt (line 7))
+  Downloading numpy-2.4.4-cp311-cp311-win_amd64.whl.metadata (6.6 kB)
+Collecting opencv_python==5.0.0.93 (from -r /src/requirements.txt (line 8))
+  Downloading opencv_python-5.0.0.93-cp37-abi3-win_amd64.whl.metadata (20 kB)
+Collecting torch==2.13.0+cpu (from -r /src/requirements.txt (line 9))
+  Downloading https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-win_amd64.whl.metadata (39 kB)
+Collecting torchvision==0.28.0+cpu (from -r /src/requirements.txt (line 10))
+  Downloading https://download-r2.pytorch.org/whl/cpu/torchvision-0.28.0%2Bcpu-cp311-cp311-win_amd64.whl.metadata (5.7 kB)
+Collecting ultralytics==8.4.95 (from -r /src/requirements.txt (line 11))
+  Downloading ultralytics-8.4.95-py3-none-any.whl.metadata (42 kB)
+     ---------------------------------------- 42.1/42.1 kB 1.8 MB/s eta 0:00:00
+Collecting pythonnet==3.1.0 (from -r /src/requirements.txt (line 12))
+  Downloading pythonnet-3.1.0-cp310.cp311.cp312.cp313.cp314-none-win32.win_amd64.whl.metadata (6.5 kB)
+Collecting pywin32==312 (from -r /src/requirements.txt (line 13))
+  Downloading pywin32-312-cp311-cp311-win_amd64.whl.metadata (11 kB)
+Collecting uiautomation==2.0.29 (from -r /src/requirements.txt (line 14))
+  Downloading uiautomation-2.0.29-py3-none-any.whl.metadata (919 bytes)
+Collecting pywebview==6.2.1 (from -r /src/requirements.txt (line 15))
+  Downloading pywebview-6.2.1-py3-none-any.whl.metadata (4.9 kB)
+Collecting scapy==2.7.0 (from -r /src/requirements.txt (line 16))
+  Downloading scapy-2.7.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting psutil==7.1.0 (from -r /src/requirements.txt (line 17))
+  Downloading psutil-7.1.0-cp37-abi3-win_amd64.whl.metadata (23 kB)
+Collecting comtypes==1.4.16 (from -r /src/requirements.txt (line 18))
+  Downloading comtypes-1.4.16-py3-none-any.whl.metadata (7.8 kB)
+Collecting clr_loader==0.3.1 (from -r /src/requirements.txt (line 19))
+  Downloading clr_loader-0.3.1-py3-none-any.whl.metadata (1.4 kB)
+Collecting cryptography==49.0.0 (from -r /src/requirements.txt (line 20))
+  Downloading cryptography-49.0.0-cp311-abi3-win_amd64.whl.metadata (4.3 kB)
+Collecting MarkupSafe==3.0.3 (from -r /src/requirements.txt (line 21))
+  Downloading https://download.pytorch.org/whl/markupsafe-3.0.3-cp311-cp311-win_amd64.whl.metadata (2.8 kB)
+Collecting windows_capture==2.0.1 (from -r /src/requirements.txt (line 22))
+  Downloading windows_capture-2.0.1-cp39-abi3-win_amd64.whl.metadata (4.9 kB)
+Collecting websockets==15.0.1 (from -r /src/requirements.txt (line 23))
+  Downloading websockets-15.0.1-cp311-cp311-win_amd64.whl.metadata (7.0 kB)
+Collecting filelock (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading filelock-4.3.1-py3-none-any.whl.metadata (2.3 kB)
+Collecting typing-extensions>=4.10.0 (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting setuptools>=77.0.3 (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading setuptools-84.2.1-py3-none-any.whl.metadata (6.6 kB)
+Collecting sympy>=1.13.3 (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+Collecting networkx>=2.5.1 (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading networkx-3.6.1-py3-none-any.whl.metadata (6.8 kB)
+Collecting jinja2 (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting fsspec>=0.8.5 (from torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading fsspec-2026.9.0-py3-none-any.whl.metadata (10 kB)
+Collecting pillow!=8.3.*,>=5.3.0 (from torchvision==0.28.0+cpu->-r /src/requirements.txt (line 10))
+  Downloading pillow-13.0.0-cp311-cp311-win_amd64.whl.metadata (9.3 kB)
+Collecting matplotlib>=3.3.0 (from ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading matplotlib-3.11.2-cp311-cp311-win_amd64.whl.metadata (80 kB)
+     ---------------------------------------- 80.3/80.3 kB 4.4 MB/s eta 0:00:00
+Collecting pyyaml>=5.3.1 (from ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading pyyaml-6.0.4-cp311-cp311-win_amd64.whl.metadata (2.4 kB)
+Collecting requests>=2.23.0 (from ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting polars>=0.20.0 (from ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading polars-2.1.0-py3-none-any.whl.metadata (11 kB)
+Collecting nvidia-ml-py>=12.0.0 (from ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading nvidia_ml_py-13.615.71-py3-none-any.whl.metadata (9.7 kB)
+Collecting ultralytics-thop>=2.0.18 (from ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading ultralytics_thop-2.2.5-py3-none-any.whl.metadata (14 kB)
+Collecting proxy_tools (from pywebview==6.2.1->-r /src/requirements.txt (line 15))
+  Downloading proxy_tools-0.1.0.tar.gz (3.0 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting bottle (from pywebview==6.2.1->-r /src/requirements.txt (line 15))
+  Downloading bottle-0.13.4-py2.py3-none-any.whl.metadata (1.6 kB)
+Collecting cffi>=1.17 (from clr_loader==0.3.1->-r /src/requirements.txt (line 19))
+  Downloading cffi-2.1.1-cp311-cp311-win_amd64.whl.metadata (2.6 kB)
+Requirement already satisfied: altgraph in c:\python\lib\site-packages (from pyinstaller) (0.17.4)
+Requirement already satisfied: pyinstaller-hooks-contrib>=2024.6 in c:\python\lib\site-packages (from pyinstaller) (2024.7)
+Requirement already satisfied: packaging>=22.0 in c:\python\lib\site-packages (from pyinstaller) (24.1)
+Requirement already satisfied: pefile>=2022.5.30 in c:\python\lib\site-packages (from pyinstaller) (2023.2.7)
+Requirement already satisfied: pywin32-ctypes>=0.2.1 in c:\python\lib\site-packages (from pyinstaller) (0.2.2)
+Collecting pycparser (from cffi>=1.17->clr_loader==0.3.1->-r /src/requirements.txt (line 19))
+  Downloading pycparser-3.12-py3-none-any.whl.metadata (9.7 kB)
+Collecting contourpy>=1.0.1 (from matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading contourpy-1.3.3-cp311-cp311-win_amd64.whl.metadata (5.5 kB)
+Collecting cycler>=0.10 (from matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading cycler-0.12.1-py3-none-any.whl.metadata (3.8 kB)
+Collecting fonttools>=4.28.2 (from matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading fonttools-4.68.0-cp311-cp311-win_amd64.whl.metadata (142 kB)
+     ------------------------------------- 142.6/142.6 kB 13.2 MB/s eta 0:00:00
+Collecting kiwisolver>=1.3.1 (from matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading kiwisolver-1.5.1-cp311-cp311-win_amd64.whl.metadata (5.2 kB)
+Collecting pyparsing>=3 (from matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading pyparsing-3.3.3-py3-none-any.whl.metadata (5.9 kB)
+Collecting python-dateutil>=2.7 (from matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading python_dateutil-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+Collecting polars-runtime-32==2.1.0 (from polars>=0.20.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading polars_runtime_32-2.1.0-cp311-abi3-win_amd64.whl.metadata (1.5 kB)
+Collecting charset_normalizer<4,>=2 (from requests>=2.23.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading charset_normalizer-3.5.3-cp311-cp311-win_amd64.whl.metadata (44 kB)
+     ---------------------------------------- 44.2/44.2 kB 3.8 MB/s eta 0:00:00
+Collecting idna<4,>=2.5 (from requests>=2.23.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+Collecting urllib3<3,>=1.26 (from requests>=2.23.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting certifi>=2023.5.7 (from requests>=2.23.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading certifi-2026.11.20-py3-none-any.whl.metadata (2.5 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy>=1.13.3->torch==2.13.0+cpu->-r /src/requirements.txt (line 9))
+  Downloading mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+Collecting tzdata (from python-dateutil>=2.7->matplotlib>=3.3.0->ultralytics==8.4.95->-r /src/requirements.txt (line 11))
+  Downloading tzdata-2026.6-py2.py3-none-any.whl.metadata (1.4 kB)
+Downloading numpy-2.4.4-cp311-cp311-win_amd64.whl (12.6 MB)
+   ---------------------------------------- 12.6/12.6 MB 23.9 MB/s eta 0:00:00
+Downloading opencv_python-5.0.0.93-cp37-abi3-win_amd64.whl (44.0 MB)
+   ---------------------------------------- 44.0/44.0 MB 13.5 MB/s eta 0:00:00
+Downloading https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-win_amd64.whl (121.9 MB)
+   --------------------------------------- 121.9/121.9 MB 12.2 MB/s eta 0:00:00
+Downloading https://download-r2.pytorch.org/whl/cpu/torchvision-0.28.0%2Bcpu-cp311-cp311-win_amd64.whl (3.8 MB)
+   ---------------------------------------- 3.8/3.8 MB 30.2 MB/s eta 0:00:00
+Downloading ultralytics-8.4.95-py3-none-any.whl (1.4 MB)
+   ---------------------------------------- 1.4/1.4 MB 26.5 MB/s eta 0:00:00
+Downloading pythonnet-3.1.0-cp310.cp311.cp312.cp313.cp314-none-win32.win_amd64.whl (1.6 MB)
+   ---------------------------------------- 1.6/1.6 MB 9.3 MB/s eta 0:00:00
+Downloading pywin32-312-cp311-cp311-win_amd64.whl (6.9 MB)
+   ---------------------------------------- 6.9/6.9 MB 25.5 MB/s eta 0:00:00
+Downloading uiautomation-2.0.29-py3-none-any.whl (198 kB)
+   --------------------------------------- 199.0/199.0 kB 15.7 MB/s eta 0:00:00
+Downloading pywebview-6.2.1-py3-none-any.whl (525 kB)
+   ---------------------------------------- 525.5/525.5 kB 4.0 MB/s eta 0:00:00
+Downloading scapy-2.7.0-py3-none-any.whl (2.6 MB)
+   ---------------------------------------- 2.6/2.6 MB 19.3 MB/s eta 0:00:00
+Downloading psutil-7.1.0-cp37-abi3-win_amd64.whl (247 kB)
+   --------------------------------------- 248.0/248.0 kB 14.9 MB/s eta 0:00:00
+Downloading comtypes-1.4.16-py3-none-any.whl (296 kB)
+   --------------------------------------- 296.2/296.2 kB 16.8 MB/s eta 0:00:00
+Downloading clr_loader-0.3.1-py3-none-any.whl (55 kB)
+   ---------------------------------------- 55.7/55.7 kB 5.1 MB/s eta 0:00:00
+Downloading cryptography-49.0.0-cp311-abi3-win_amd64.whl (3.8 MB)
+   ---------------------------------------- 3.8/3.8 MB 12.8 MB/s eta 0:00:00
+Downloading https://download.pytorch.org/whl/markupsafe-3.0.3-cp311-cp311-win_amd64.whl (15 kB)
+Downloading windows_capture-2.0.1-cp39-abi3-win_amd64.whl (229 kB)
+   --------------------------------------- 229.1/229.1 kB 18.2 MB/s eta 0:00:00
+Downloading websockets-15.0.1-cp311-cp311-win_amd64.whl (176 kB)
+   --------------------------------------- 176.8/176.8 kB 11.1 MB/s eta 0:00:00
+Downloading cffi-2.1.1-cp311-cp311-win_amd64.whl (185 kB)
+   --------------------------------------- 185.1/185.1 kB 15.9 MB/s eta 0:00:00
+Downloading fsspec-2026.9.0-py3-none-any.whl (221 kB)
+   --------------------------------------- 221.7/221.7 kB 17.6 MB/s eta 0:00:00
+Downloading matplotlib-3.11.2-cp311-cp311-win_amd64.whl (9.3 MB)
+   ---------------------------------------- 9.3/9.3 MB 10.8 MB/s eta 0:00:00
+Downloading networkx-3.6.1-py3-none-any.whl (2.1 MB)
+   ---------------------------------------- 2.1/2.1 MB 10.8 MB/s eta 0:00:00
+Downloading nvidia_ml_py-13.615.71-py3-none-any.whl (58 kB)
+   ---------------------------------------- 58.1/58.1 kB 6.0 MB/s eta 0:00:00
+Downloading pillow-13.0.0-cp311-cp311-win_amd64.whl (7.3 MB)
+   ---------------------------------------- 7.3/7.3 MB 8.1 MB/s eta 0:00:00
+Downloading polars-2.1.0-py3-none-any.whl (911 kB)
+   --------------------------------------- 911.5/911.5 kB 12.3 MB/s eta 0:00:00
+Downloading polars_runtime_32-2.1.0-cp311-abi3-win_amd64.whl (53.9 MB)
+   ---------------------------------------- 53.9/53.9 MB 8.0 MB/s eta 0:00:00
+Downloading pyyaml-6.0.4-cp311-cp311-win_amd64.whl (161 kB)
+   ---------------------------------------- 161.8/161.8 kB 4.9 MB/s eta 0:00:00
+Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+   ---------------------------------------- 73.1/73.1 kB 7.0 MB/s eta 0:00:00
+Using cached setuptools-84.2.1-py3-none-any.whl (876 kB)
+Downloading sympy-1.14.0-py3-none-any.whl (6.3 MB)
+   ---------------------------------------- 6.3/6.3 MB 12.1 MB/s eta 0:00:00
+Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+   ---------------------------------------- 45.6/45.6 kB 2.9 MB/s eta 0:00:00
+Downloading ultralytics_thop-2.2.5-py3-none-any.whl (32 kB)
+Downloading bottle-0.13.4-py2.py3-none-any.whl (103 kB)
+   ---------------------------------------- 103.8/103.8 kB 9.4 MB/s eta 0:00:00
+Downloading filelock-4.3.1-py3-none-any.whl (244 kB)
+   --------------------------------------- 244.6/244.6 kB 13.0 MB/s eta 0:00:00
+Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl (134 kB)
+   --------------------------------------- 134.9/134.9 kB 12.5 MB/s eta 0:00:00
+Downloading certifi-2026.11.20-py3-none-any.whl (127 kB)
+   --------------------------------------- 127.9/127.9 kB 11.8 MB/s eta 0:00:00
+Downloading charset_normalizer-3.5.3-cp311-cp311-win_amd64.whl (212 kB)
+   --------------------------------------- 212.9/212.9 kB 15.6 MB/s eta 0:00:00
+Downloading contourpy-1.3.3-cp311-cp311-win_amd64.whl (225 kB)
+   --------------------------------------- 225.2/225.2 kB 15.4 MB/s eta 0:00:00
+Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+Downloading fonttools-4.68.0-cp311-cp311-win_amd64.whl (1.7 MB)
+   ---------------------------------------- 1.7/1.7 MB 17.6 MB/s eta 0:00:00
+Downloading idna-3.20-py3-none-any.whl (69 kB)
+   ---------------------------------------- 69.6/69.6 kB 5.9 MB/s eta 0:00:00
+Downloading kiwisolver-1.5.1-cp311-cp311-win_amd64.whl (70 kB)
+   ---------------------------------------- 70.7/70.7 kB 6.1 MB/s eta 0:00:00
+Downloading mpmath-1.3.0-py3-none-any.whl (536 kB)
+   --------------------------------------- 536.2/536.2 kB 16.4 MB/s eta 0:00:00
+Downloading pyparsing-3.3.3-py3-none-any.whl (126 kB)
+   --------------------------------------- 126.4/126.4 kB 11.6 MB/s eta 0:00:00
+Downloading python_dateutil-4.0.0-py3-none-any.whl (92 kB)
+   ---------------------------------------- 92.9/92.9 kB 8.3 MB/s eta 0:00:00
+Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+   ---------------------------------------- 135.7/135.7 kB 7.8 MB/s eta 0:00:00
+Downloading pycparser-3.12-py3-none-any.whl (62 kB)
+   ---------------------------------------- 62.6/62.6 kB 4.8 MB/s eta 0:00:00
+Downloading tzdata-2026.6-py2.py3-none-any.whl (348 kB)
+   --------------------------------------- 348.2/348.2 kB 14.1 MB/s eta 0:00:00
+Building wheels for collected packages: proxy_tools
+  Building wheel for proxy_tools (pyproject.toml): started
+  Building wheel for proxy_tools (pyproject.toml): finished with status 'done'
+  Created wheel for proxy_tools: filename=proxy_tools-0.1.0-py3-none-any.whl size=2944 sha256=91d8e29f82224149a1c27cb19a26d1efc656bf8edbd0464983364653b98cba51
+  Stored in directory: c:\users\root\appdata\local\pip\cache\wheels\2b\5f\96\7e96e7cbf06e426e168a6891a6ca2226787cc79fc816830dd4
+Successfully built proxy_tools
+Installing collected packages: proxy_tools, nvidia-ml-py, mpmath, bottle, websockets, urllib3, tzdata, typing-extensions, sympy, setuptools, scapy, pyyaml, pywin32, pyparsing, pycparser, psutil, polars-runtime-32, pillow, numpy, networkx, MarkupSafe, kiwisolver, idna, fsspec, fonttools, filelock, cycler, comtypes, charset_normalizer, certifi, uiautomation, requests, python-dateutil, polars, opencv_python, jinja2, contourpy, cffi, windows_capture, torch, matplotlib, cryptography, clr_loader, ultralytics-thop, torchvision, pythonnet, ultralytics, pywebview
+  Attempting uninstall: setuptools
+    Found existing installation: setuptools 65.5.0
+    Uninstalling setuptools-65.5.0:
+      Successfully uninstalled setuptools-65.5.0
+Successfully installed MarkupSafe-3.0.3 bottle-0.13.4 certifi-2026.11.20 cffi-2.1.1 charset_normalizer-3.5.3 clr_loader-0.3.1 comtypes-1.4.16 contourpy-1.3.3 cryptography-49.0.0 cycler-0.12.1 filelock-4.3.1 fonttools-4.68.0 fsspec-2026.9.0 idna-3.20 jinja2-3.1.6 kiwisolver-1.5.1 matplotlib-3.11.2 mpmath-1.3.0 networkx-3.6.1 numpy-2.4.4 nvidia-ml-py-13.615.71 opencv_python-5.0.0.93 pillow-13.0.0 polars-2.1.0 polars-runtime-32-2.1.0 proxy_tools-0.1.0 psutil-7.1.0 pycparser-3.12 pyparsing-3.3.3 python-dateutil-4.0.0 pythonnet-3.1.0 pywebview-6.2.1 pywin32-312 pyyaml-6.0.4 requests-2.34.2 scapy-2.7.0 setuptools-84.2.1 sympy-1.14.0 torch-2.13.0+cpu torchvision-0.28.0+cpu typing-extensions-4.16.0 tzdata-2026.6 uiautomation-2.0.29 ultralytics-8.4.95 ultralytics-thop-2.2.5 urllib3-2.8.0 websockets-15.0.1 windows_capture-2.0.1
+
+[notice] A new release of pip is available: 24.0 -> 26.3
+[notice] To update, run: python.exe -m pip install --upgrade pip

@@ -11,9 +11,13 @@ from collections import Counter
 import cv2
 import numpy as np
 
+# Absolute floor for a medallion match. The gap test alone let a weak 0.889 background score win
+# when the medallion was only half-visible, which is how a stray first frame could vote a wrong
+# start slot. Real sightings score >= 0.96, clean background sits at 0.887-0.891.
+MARKER_ABS = 0.93
 MARKER_GAP = 0.03
-MARKER_NEED = 4
-MARKER_WIN = 6
+MARKER_NEED = 2
+MARKER_WIN = 5
 REGION = (287, 231, 734, 582)
 MARKER_BAND_Y1 = 130
 MARKER_WIN_X = 45
@@ -152,7 +156,7 @@ def find_marker_slot(region_img):
     frames and vote (see vote_marker)."""
     scores = marker_scores(region_img)
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
-    if not ranked or ranked[0][1] <= 0:
+    if not ranked or ranked[0][1] < MARKER_ABS:
         return None
     if ranked[0][1] - ranked[1][1] < MARKER_GAP:
         return None

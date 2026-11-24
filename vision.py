@@ -352,6 +352,8 @@ def _load_revive_mask():
     if _revive_mask is None and os.path.exists(_REVIVE_MASK_PATH):
         m = cv2.imread(_REVIVE_MASK_PATH, cv2.IMREAD_GRAYSCALE)
         if m is not None:
+            if m.ndim == 3:          # cv2 5.0 returns (h, w, 1) for IMREAD_GRAYSCALE
+                m = m[:, :, 0]
             _revive_mask = (m > 127).astype(np.uint8)
     return _revive_mask
 

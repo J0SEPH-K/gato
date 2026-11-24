@@ -1,0 +1,3762 @@
+
+===== jochul.py (   35574 bytes) =====
+# Decompiled with PyLingual (https://pylingual.io)
+# Internal filename: 'jochul.py'
+# Bytecode version: 3.11a7e (3495)
+# Source timestamp: 2026-08-17 09:30:58 UTC (1786959058)
+
+import threading
+import time
+from collections import Counter
+import numpy as np
+REGION = (287, 231, 734, 582)
+PARK_XY = (292, 167)
+CLICK_Y = 373
+CLICK_X = {1: 352, 2: 432, 3: 512, 4: 592, 5: 672}
+FIRST_TILE_DELAY = 0.5
+SHUFFLE_DELAY = 2.5
+FPS = 15
+DURATION_S = 13.5
+PERIOD = 13
+N_OPS = 15
+EXT_K = 6
+CONF = 0.3
+CONF_SENS = 0.15
+IMG_SIZE = 256
+BATCH = 8
+Y_TOL_NORM = 0.05714285714285714
+CLASS_RANGES_NORM = {1: (0.0, 0.227), 2: (0.227, 0.409), 3: (0.409, 0.591), 4: (0.591, 0.773), 5: (0.773, 1.0)}
+ALL_SLOTS = {1, 2, 3, 4, 5}
+_PAT1 = ((10, 17, 69), (10, 17, 69), (8, 14, 61), (10, 16, 79))
+_PAT2 = ((17, 28, 111), (17, 28, 111), (13, 22, 94), (17, 26, 127))
+_PAT_TOL = 3
+_FIRST_TILE_LIMITS = ((1, 105), (2, 185), (3, 265), (4, 345))
+def crop_region(frame):
+    x0, y0, x1, y1 = REGION
+    return frame[y0:y1, x0:x1]
+def _find_pattern(img, pat, tol=_PAT_TOL):
+    # ***<module>._find_pattern: Failure: Different bytecode
+    tl, tr, bl, br = pat
+    a = img.astype(np.int16)
+    m = (np.abs(a[:(-1), :(-1)] - np.asarray(tl, np.int16)) <= tol).all(2) & (np.abs(a[:(-1), 1:] - np.asarray(tr, np.int16)) <= tol).all(2) & (np.abs(a[1:, :(-1)] - np.asarray(bl, np.int16)) <= tol).all(2) & (np.abs(a[1:, 1:] - np.asarray(br, np.int16)) <= tol).all(2)
+    ys, xs = np.where(m)
+    return list(zip(xs.tolist(), ys.tolist()))
+def find_first_tile(region_img):
+    pts = _find_pattern(region_img, _PAT1) or _find_pattern(region_img, _PAT2)
+    if not pts:
+        return
+    else:
+        x = pts[0][0]
+        for slot, limit in _FIRST_TILE_LIMITS:
+            if x <= limit:
+                return slot
+        return 5
+def find_marker_slot(region_img):
+    """Slot (1-5) under the floating gold 마패 medallion, or None. Skin-independent: it looks for the
+    medallion's colour, not for the character sprite (the pixel pattern in find_first_tile is the
+    navy hair of one skin). The medallion bobs, so call it on several frames and vote (see vote_marker)."""
+    import cv2
+    hsv = cv2.cvtColor(np.ascontiguousarray(region_img), cv2.COLOR_BGR2HSV)
+    m = ((hsv[..., 0] >= 14) & (hsv[..., 0] <= 30) & (hsv[..., 1] >= 140) & (hsv[..., 2] >= 170)).astype(np.uint8)
+    n, _, st, cen = cv2.connectedComponentsWithStats(m, 8)
+    best = None
+    for i in range(1, n):
+        a = int(st[i, 4])
+        if 60 <= a <= 900 and (best is None or a > best[0]):
+            best = (a, float(cen[i][0]))
+    if best is None:
+        return None
+    xs = [CLICK_X[k] - REGION[0] for k in (1, 2, 3, 4, 5)]
+    return 1 + int(np.argmin([abs(best[1] - x) for x in xs]))
+
+
+def vote_marker(slots):
+    """Most common slot among the frames where the medallion was seen (None if never seen)."""
+    seen = [x for x in slots if x]
+    return Counter(seen).most_common(1)[0][0] if seen else None
+
+
+def record(capture_fn, fps=FPS, duration=DURATION_S):
+    interval = 1.0 / fps
+    total = int(fps * duration)
+    frames, times = ([], [])
+    t0 = time.perf_counter()
+    next_t = t0
+    for _ in range(total):
+        now = time.perf_counter()
+        if now < next_t:
+            time.sleep(next_t - now)
+        next_t += interval
+        f = capture_fn()
+        if f is not None:
+            frames.append(np.ascontiguousarray(crop_region(f)))
+            times.append(time.perf_counter() - t0)
+    return (frames, times)
+def _resample_uniform(per_frame, times, fps=FPS):
+    if not times:
+        return list(per_frame)
+    n_grid = max(1, int(round(times[-1] * fps)) + 1)
+    grid = [None] * n_grid
+    for det, t in zip(per_frame, times):
+        k = int(round(t * fps))
+        if 0 <= k < n_grid and (grid[k] is None or det is not None):
+            grid[k] = det
+    return grid
+def _horizontal_groups(pts, y_tol):
+    if pts.shape[0] == 0:
+        return []
+    order = np.argsort(pts[:, 1])
+    ys = pts[order, 1]
+    out, i, n = ([], 0, len(ys))
+    while i < n:
+        j = i
+        while j < n and ys[j] - ys[i] <= y_tol:
+            j += 1
+        idxs = order[i:j].tolist()
+        out.append((idxs, j - i, float(ys[i:j].mean())))
+        i = j
+    return out
+
+
+def _slot_from_x(x, w):
+    for slot, (lo, hi) in CLASS_RANGES_NORM.items():
+        if lo * w <= x < hi * w:
+                return slot
+def _missing_from_pts(pts, w, h):
+    if len(pts) == 0:
+        return
+    else:
+        pts = np.asarray(pts, dtype=float)
+        groups = _horizontal_groups(pts, Y_TOL_NORM * h)
+        sizes = sorted((g[1] for g in groups))
+        if len(groups) == 3 and sizes == [1, 2, 2]:
+                return
+        cand = [(g, s) for g, s, ym in groups if s == 3 or (s == 2 and 110 <= ym <= 170)]
+        if not cand:
+            return
+        else:
+            idxs, s = cand[0]
+            seen = set()
+            for i in idxs:
+                slot = _slot_from_x(pts[i][0], w)
+                if slot is None:
+                    return
+                else:
+                    seen.add(slot)
+            if len(seen) < 2:
+                return
+            else:
+                missing = tuple(sorted(ALL_SLOTS - seen))
+                if s == 3 and len(missing) == 2 or (s == 2 and len(missing) == 3):
+                    return missing
+                else:
+                    return None
+def _vote_block(items):
+    pairs = [t for t in items if len(t) == 2]
+    triples = [t for t in items if len(t) == 3]
+    if pairs:
+        top = Counter(pairs).most_common(2)
+        if len(top) > 1 and top[0][1] == top[1][1]:
+                return
+        return top[0][0]
+    else:
+        if triples:
+            inter = set(triples[0])
+            for t in triples[1:]:
+                inter &= set(t)
+            if len(inter) == 2:
+                return tuple(sorted(inter))
+            else:
+                return Counter(triples).most_common(1)[0][0]
+def _resolve_pairs(votes, block_items, sens_items=None, ext_items=None):
+    n = len(votes)
+    resolved = [tuple(sorted(v)) if v and len(v) == 2 else None for v in votes]
+    def _cooc(items, allowed):
+        pair_cnt = Counter()
+        cnt = Counter()
+        for t in items:
+            s = sorted((x for x in t if allowed is None or x in allowed))
+            for x in s:
+                cnt[x] += 1
+            for a in range(len(s)):
+                for b in range(a + 1, len(s)):
+                    pair_cnt[s[a], s[b]] += 1
+        return (pair_cnt, cnt)
+    def _freq_top2(i, allowed):
+        pair_cnt, cnt = _cooc(block_items[i], allowed)
+        ext_pair = Counter() if ext_items is None else _cooc(ext_items[i], allowed)[0]
+        sens_pair = Counter() if sens_items is None else _cooc(sens_items[i], allowed)[0]
+        if pair_cnt:
+            return sorted(pair_cnt.items(), key=lambda kv: (-kv[1], -ext_pair[kv[0]], -sens_pair[kv[0]], kv[0]))[0][0]
+        else:
+            if len(cnt) < 2:
+                return
+            else:
+                ext_cnt = Counter() if ext_items is None else _cooc(ext_items[i], allowed)[1]
+                sens_cnt = Counter() if sens_items is None else _cooc(sens_items[i], allowed)[1]
+                top = sorted(cnt.items(), key=lambda kv: (-kv[1], -ext_cnt[kv[0]], -sens_cnt[kv[0]], kv[0]))[:2]
+                return tuple(sorted((s for s, _ in top)))
+    for _ in range(n + 2):
+        changed = False
+        for i in range(n):
+            if resolved[i] is not None:
+                continue
+            else:
+                forbid = set()
+                if i - 1 >= 0 and resolved[i - 1]:
+                        forbid |= set(resolved[i - 1])
+                if i + 1 < n and resolved[i + 1]:
+                        forbid |= set(resolved[i + 1])
+                allowed = ALL_SLOTS - forbid
+                pick = tuple(sorted(allowed)) if len(allowed) == 2 else _freq_top2(i, allowed)
+                if pick and len(pick) == 2:
+                        resolved[i] = pick
+                        changed = True
+        if not changed:
+            break
+    for i in range(n):
+        if resolved[i] is None:
+            resolved[i] = _freq_top2(i, None)
+    return [r for r in resolved if r is not None]
+def periodic_decode(per_frame, period=PERIOD, n_ops=N_OPS, per_frame_sens=None):
+    # ***<module>.periodic_decode: Failure: Different control flow
+    n = len(per_frame)
+    if n == 0:
+        return []
+    else:
+        if n_ops is None:
+            n_ops = max(1, round(n / period))
+        search = int(period) // 2 + 1
+        cands = sorted((period + 0.25 * k for k in range((-4), 3)), key=lambda p: abs(p - period))
+        best = None
+        for p in cands:
+            # p 후보별 최적 phi 를 찾는다
+            for phi in range(-search, search + 1):
+                ops, block_items, compat, bnd_none = ([], [], 0, 0)
+                for i in range(1, n_ops):
+                    b = int(round(phi + p * i))
+                    if 0 <= b < n and per_frame[b] is None:
+                                bnd_none += 1
+                for i in range(n_ops):
+                    lo = int(round(phi + p * i))
+                    hi = int(round(phi + p * (i + 1)))
+                    items = [per_frame[f] for f in range(max(0, lo), min(n, hi)) if per_frame[f] is not None]
+                    v = _vote_block(items)
+                    ops.append(v)
+                    block_items.append(items)
+                    if v and len(v) == 2:
+                            ps = set(v)
+                            compat += sum((1 for t in items if ps.issubset(set(t))))
+                # Only two valid swaps that share a tile count as a violation (a tile cannot be in two
+                # consecutive swaps). An undecided block (None) is NOT a violation: the decompiled
+                # source had `not a or not b or ...` here, which the original bytecode does not do.
+                viol = sum((1 for a, b in zip(ops, ops[1:]) if a and b and len(a) == 2 and (len(b) == 2) and set(a) & set(b)))
+                key = (-viol, bnd_none, compat)
+                if best is None or key > best[0]:
+                    best = (key, ops, block_items, p, phi)
+        _, _, _, p, phi = best
+        ext_items = []
+        sens_items = [] if per_frame_sens is not None else None
+        for i in range(n_ops):
+            lo = int(round(phi + p * i))
+            hi = int(round(phi + p * (i + 1)))
+            ext_items.append([per_frame[f] for f in range(max(0, lo - EXT_K), min(n, hi + EXT_K)) if per_frame[f] is not None])
+            if sens_items is not None:
+                sens_items.append([per_frame_sens[f] for f in range(max(0, lo), min(n, hi)) if per_frame_sens[f] is not None])
+        return _resolve_pairs(best[1], best[2], sens_items, ext_items)
+
+def _viol_count(ops):
+    return sum((1 for a, b in zip(ops, ops[1:]) if set(a) & set(b)))
+def apply_swaps(ops, init=(1, 2, 3, 4, 5)):
+    lst = list(init)
+    for op in ops:
+        if op and len(op) == 2:
+                i, j = (op[0] - 1, op[1] - 1)
+                lst[i], lst[j] = (lst[j], lst[i])
+    return lst
+class JochulSolver:
+    def __init__(self, model_path):
+        self.model_path = model_path
+        self.model = None
+        self.ready = False
+    def preload(self):
+        import torch
+        from ultralytics import YOLO
+        self.model = YOLO(self.model_path)
+        if torch.cuda.is_available():
+            self.model.fuse()
+        dummy = np.zeros((351, 447, 3), np.uint8)
+        self.model.predict(source=dummy, imgsz=IMG_SIZE, conf=CONF, verbose=False)
+        self.ready = True
+    def solve(self, frames, times, first_slot):
+        per_std, per_sens = self._detect_missing(frames)
+        ops = periodic_decode(_resample_uniform(per_std, times), per_frame_sens=_resample_uniform(per_sens, times))
+        order = apply_swaps(ops)
+        if first_slot not in order:
+            return (None, ops)
+        else:
+            return (order.index(first_slot) + 1, ops)
+
+    def detect_centroids(self, frames, conf=0.20):
+        """Per-frame list of (x, y) character centroids from the YOLO detector (not the missing-tile
+        logic): the input `track_centroids` needs."""
+        import torch
+        use_cuda = torch.cuda.is_available()
+        out = [[] for _ in frames]
+        for s in range(0, len(frames), BATCH):
+            batch = frames[s:s + BATCH]
+            results = self.model.predict(source=batch, conf=conf, imgsz=IMG_SIZE,
+                                          device=0 if use_cuda else 'cpu', max_det=10, iou=0.45, verbose=False)
+            for bi, res in enumerate(results):
+                b = res.boxes
+                if b is None or len(b) == 0:
+                    continue
+                xyxy = b.xyxy.cpu().numpy()
+                out[s + bi] = [((x[0] + x[2]) / 2, (x[1] + x[3]) / 2) for x in xyxy]
+        return out
+
+    ENSEMBLE_SETTINGS = [(100.0, 0.6), (100.0, 0.95), (150.0, 0.8), (220.0, 0.6), (220.0, 0.95)]
+    # A simple majority (3/5) is too weak for a costly wrong click: it lets two settings
+    # disagree and still auto-click. The only labelled clean real round we have currently
+    # produces 4/5 votes for the confirmed answer, so require at least 4/5 and abstain otherwise.
+    MIN_ENSEMBLE_VOTES = 4
+
+    def solve_tracked(self, frames, times, first_slot, conf=0.20, settings=None):
+        """Primary live answer (see the note above TRACK_SLOT_X): velocity-predicted Hungarian
+        tracking of the YOLO detector's own centroids through the whole scatter.
+
+        Detection (the slow ~5 s part) runs ONCE; the tracker then runs over several (gate, decay)
+        settings on that same detection set (cheap - this adds well under 1 s) and votes. Confirmed
+        9/9 agreement on the one real labelled round at the single default setting; voting across
+        settings makes a FUTURE round that is less clean say 'uncertain' instead of confidently
+        picking whichever setting happened to run, which is the harder failure mode to catch.
+        Returns (answer_or_None, info_string). answer is None when there is no majority.
+        """
+        dets = self.detect_centroids(frames, conf=conf)
+        votes = []
+        for gate, decay in (settings or self.ENSEMBLE_SETTINGS):
+            ans, _ = track_centroids(times, dets, first_slot, gate=gate, decay=decay)
+            votes.append(ans)
+        counts = Counter(v for v in votes if v is not None)
+        if not counts:
+            return None, f'no setting found a usable start/end row (votes={votes})'
+        top, n_top = counts.most_common(1)[0]
+        info = f'ensemble {dict(counts)} of {len(votes)}'
+        if n_top < self.MIN_ENSEMBLE_VOTES or n_top * 2 <= len(votes):
+            return None, f'insufficient agreement (<{self.MIN_ENSEMBLE_VOTES}/5) - {info}'
+        return top, info
+    def _detect_missing(self, frames):
+        import torch
+        use_cuda = torch.cuda.is_available()
+        std = [None] * len(frames)
+        sens = [None] * len(frames)
+        for s in range(0, len(frames), BATCH):
+            batch = frames[s:s + BATCH]
+            results = self.model.predict(source=batch, conf=CONF_SENS, imgsz=IMG_SIZE, device=0 if use_cuda else 'cpu', max_det=10, iou=0.45, verbose=False)
+            for bi, res in enumerate(results):
+                h, w = batch[bi].shape[:2]
+                b = res.boxes
+                if b is None or len(b) == 0:
+                    continue
+                else:
+                    xyxy = b.xyxy.cpu().numpy()
+                    cf = b.conf.cpu().numpy()
+                    pts = np.column_stack(((xyxy[:, 0] + xyxy[:, 2]) / 2, (xyxy[:, 1] + xyxy[:, 3]) / 2))
+                    std[s + bi] = _missing_from_pts(pts[cf >= CONF], w, h)
+                    sens[s + bi] = _missing_from_pts(pts, w, h)
+        return (std, sens)
+
+# ---------------------------------------------------------------------------------------------
+# EXPERIMENTAL, NOT WIRED IN: all-frames recording and global swap decoding (2026-11-20)
+#
+# The original pipeline sampled the screen 15 times a second and trusted one fixed swap period
+# (13 samples). Here every distinct frame the game delivers is kept with its arrival time, and the
+# swap sequence is found by one global search over (period, phase, 15 swaps) that maximises the
+# agreement between the per-frame detections and the swaps, with a penalty when two consecutive
+# swaps share a tile (the game never does that). The period is estimated from the data (0.70 s to
+# 1.10 s), so a different shuffle speed no longer breaks it.
+# ---------------------------------------------------------------------------------------------
+REF_W, REF_H = 1024, 768
+MAX_REC_FPS = 45.0
+PERIOD_S_NOMINAL = PERIOD / float(FPS)            # 0.8667 s per swap
+PERIOD_S_RANGE = (0.70, 1.10)
+PAIRS = [(a, b) for a in range(1, 6) for b in range(a + 1, 6)]
+_PAIR_INDEX = {p: i for i, p in enumerate(PAIRS)}
+
+
+def record_all(hwnd, duration=DURATION_S, stop=None, max_fps=MAX_REC_FPS):
+    """Keep EVERY distinct game frame for `duration` seconds (not a fixed 15 Hz sample).
+    Returns (crops, times); times are seconds since the first poll. Needs the WGC capture session
+    (it counts frames); falls back to ~30 Hz polling of the normal grab if WGC is unavailable."""
+    import cv2
+    import capture
+    import wgc
+    sess = wgc._session(hwnd) if wgc.available() else None
+    frames, times = [], []
+    t0 = time.perf_counter()
+    last_seq, last_t = -1, -1.0
+    next_poll = t0
+    min_gap = 1.0 / max_fps
+    while True:
+        now = time.perf_counter()
+        if now - t0 >= duration or (stop is not None and stop()):
+            break
+        f = None
+        if sess is not None:
+            seq = sess.frames
+            if seq != last_seq and now - t0 - last_t >= min_gap * 0.9:
+                info = sess.client_frame_info()
+                if info is not None:
+                    f, last_seq = info[0], info[2]
+                else:
+                    last_seq = seq
+                now = time.perf_counter()
+            else:
+                time.sleep(0.001)
+                continue
+        else:
+            if now < next_poll:
+                time.sleep(0.001)
+                continue
+            next_poll = now + 1.0 / 30.0
+            f = capture.grab_hwnd(hwnd, normalize=False)
+        if f is None:
+            continue
+        if (f.shape[1], f.shape[0]) != (REF_W, REF_H):
+            f = cv2.resize(f, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+        frames.append(np.ascontiguousarray(crop_region(f)))
+        last_t = now - t0
+        times.append(last_t)
+    return frames, times
+
+
+def _obs_matrix(per_std, per_sens, w_std=1.0, w_sens=0.35):
+    """Per-frame evidence for each of the 10 possible swaps: shape (n, 10).
+    A detected missing PAIR supports exactly that swap (+), contradicts a swap sharing one tile
+    a little and a disjoint swap more. A missing TRIPLE (one false slot) supports the 3 pairs inside it."""
+    n = len(per_std)
+    m = np.zeros((n, len(PAIRS)), np.float32)
+    for src, w in ((per_std, w_std), (per_sens, w_sens)):
+        if src is None:
+            continue
+        for i, v in enumerate(src):
+            if not v:
+                continue
+            sv = set(v)
+            if len(v) == 2:
+                for k, p in enumerate(PAIRS):
+                    inter = len(sv & set(p))
+                    m[i, k] += w * (1.0 if inter == 2 else (-0.25 if inter == 1 else -0.6))
+            elif len(v) == 3:
+                for k, p in enumerate(PAIRS):
+                    m[i, k] += w * (0.45 if set(p) <= sv else -0.35)
+    return m
+
+
+_OVERLAP = np.array([[1.0 if set(p) & set(q) else 0.0 for q in PAIRS] for p in PAIRS], np.float32)
+
+
+def dp_decode(per_std, times, per_sens=None, n_ops=N_OPS, overlap_penalty=4.0, period_range=PERIOD_S_RANGE,
+              t_step=0.005, phase_step=0.02, return_info=False):
+    """Global decode. per_std/per_sens: per-frame missing tuple or None at the frame arrival `times`
+    (seconds). Returns the list of swaps (n_ops pairs)."""
+    n = len(per_std)
+    if n == 0:
+        return ([], {}) if return_info else []
+    times = np.asarray(times, np.float64)
+    m = _obs_matrix(per_std, per_sens)
+    cum = np.vstack([np.zeros((1, m.shape[1]), np.float32), np.cumsum(m, axis=0)])
+    best = None
+    for T in np.arange(period_range[0], period_range[1] + 1e-9, t_step):
+        # prefer the nominal speed slightly when evidence is equal
+        prior = -0.15 * abs(T - PERIOD_S_NOMINAL) / 0.05
+        for phi in np.arange(-0.5 * T, 0.5 * T + 1e-9, phase_step):
+            edges = phi + T * np.arange(n_ops + 1)
+            idx = np.searchsorted(times, edges)
+            idx = np.clip(idx, 0, n)
+            block = cum[idx[1:]] - cum[idx[:-1]]               # (n_ops, 10)
+            # DP over blocks with a soft "no shared tile with the previous swap" rule
+            score = block[0].copy()
+            back = np.zeros((n_ops, len(PAIRS)), np.int8)
+            for k in range(1, n_ops):
+                trans = score[:, None] - overlap_penalty * _OVERLAP      # (prev, cur)
+                back[k] = np.argmax(trans, axis=0)
+                score = trans[back[k], np.arange(len(PAIRS))] + block[k]
+            end = int(np.argmax(score))
+            total = float(score[end]) + prior
+            if best is None or total > best[0]:
+                best = (total, T, phi, end, back.copy())
+    total, T, phi, end, back = best
+    seq = [end]
+    for k in range(n_ops - 1, 0, -1):
+        seq.append(int(back[k, seq[-1]]))
+    seq.reverse()
+    ops = [PAIRS[i] for i in seq]
+    if return_info:
+        viol = sum(1 for a, b in zip(ops, ops[1:]) if set(a) & set(b))
+        return ops, {'score': total, 'period_s': float(T), 'phase_s': float(phi), 'violations': viol, 'frames': n}
+    return ops
+
+
+def resample_vote(per_frame, times, fps=FPS):
+    """Aggregate many irregular samples into the fixed-rate grid the original decoder expects: each cell
+    takes the most common detection in it (a cell with only misses stays None)."""
+    if not times:
+        return list(per_frame)
+    n_grid = max(1, int(round(times[-1] * fps)) + 1)
+    cells = [[] for _ in range(n_grid)]
+    for det, t in zip(per_frame, times):
+        k = int(round(t * fps))
+        if 0 <= k < n_grid and det is not None:
+            cells[k].append(det)
+    return [Counter(c).most_common(1)[0][0] if c else None for c in cells]
+
+
+# ---------------------------------------------------------------------------------------------
+# LIVE TRACKER-BASED SOLVER (2026-11-20): the swap-model decoders above (periodic_decode, dp_decode)
+# both got the one real, user-confirmed round WRONG (start 2, true end 5) no matter how they were
+# tuned. A simple velocity-predicted Hungarian-matching tracker on the YOLO detector's own centroids
+# (not background-subtraction blobs, which score much worse) got that SAME round right in all 9
+# parameter combinations tried. This is therefore the primary live answer; periodic_decode/dp_decode
+# are kept only as a secondary signal recorded for comparison, not used to choose the click.
+# n=1 confirmed round: this is evidence of being less wrong, not a proven accuracy number. Every
+# future round must still be recorded and labelled so the real hit rate can be measured.
+# ---------------------------------------------------------------------------------------------
+TRACK_SLOT_X = np.array([65, 145, 225, 305, 385], float)  # board-crop coords of the 5 slots
+TRACK_ROW_Y = 140.0
+MAX_SETTLE_SPEED = 100.0  # px/s; above this the tracked character is still visibly sliding, not
+                          # settled - see the extrapolated-end guard in track_centroids(). Real
+                          # settled speeds measured so far: ~0-59 px/s; a real still-moving case
+                          # measured 233 px/s. Comfortably between the two, not yet validated
+                          # against more real data.
+
+
+def _assign_optimal(cost):
+    """Optimal assignment for a small, possibly RECTANGULAR cost matrix (5 tracked points x however
+    many detections this frame has, which is often not exactly 5) by brute force over permutations
+    of the larger side, so the live app does not need to bundle scipy for this 5-ish x 5-ish problem."""
+    import itertools
+    n_r, n_c = cost.shape
+    best_cost, best_rows, best_cols = None, None, None
+    if n_r <= n_c:
+        for cols in itertools.permutations(range(n_c), n_r):
+            c = sum(cost[i, cols[i]] for i in range(n_r))
+            if best_cost is None or c < best_cost:
+                best_cost, best_rows, best_cols = c, tuple(range(n_r)), cols
+    else:
+        for rows in itertools.permutations(range(n_r), n_c):
+            c = sum(cost[rows[j], j] for j in range(n_c))
+            if best_cost is None or c < best_cost:
+                best_cost, best_rows, best_cols = c, rows, tuple(range(n_c))
+    return np.array(best_rows), np.array(best_cols)
+
+
+def _in_row(pts):
+    return len(pts) >= 5 and np.std([p[1] for p in pts]) < 14 and abs(np.median([p[1] for p in pts]) - TRACK_ROW_Y) < 40
+
+
+def track_centroids(times, dets, start_slot, gate=150.0, decay=0.8):
+    """dets: per-frame list of (x, y) character centroids (from the YOLO detector, not background
+    blobs). Returns (final slot 1-5 of the character that started at start_slot, info string), or
+    (None, reason) if no usable start row was found.
+
+    BUG (found 2026-11-22 from a real customer's logged failure, not the dev fixture): this used to
+    always require a clean 5-point row near the END too, found by scanning backward for the last
+    _in_row() frame. On a real round that end anchor can simply not exist - one character was
+    undetected (occlusion/overlap) through the ENTIRE 1.4 s settle window right before reveal,
+    something the one clean dev-fixture round never exercised (its tail is instead a few frames of
+    reveal-popup visual noise AFTER a perfectly clean settled row, which the old code correctly
+    anchored on). When no late clean row exists, the backward scan used to fall through all the way
+    to whatever row it last saw - in the logged failure, frames 0-3 (the first 0.06 s, before the
+    shuffle even started) - so both anchors ended up inside that 0.06 s window and the 'track'
+    covered none of the actual 13.4 s shuffle. Every ensemble setting agreed (5/5, looked maximally
+    confident) because they were all measuring the same zero-motion no-op, not because the answer
+    was right - the game's own reveal proved it wrong.
+    Fix: keep the original fast path (anchor on a genuine LATE clean row, matching tracked
+    positions against that real frame) whenever one exists in roughly the back half of the
+    recording - this is what makes the dev fixture work and is more precise than the fallback
+    when the data allows it. Only when no such late anchor exists (the real-failure case) fall
+    back to tracking continuously, frame by frame, all the way to the actual last frame via the
+    existing velocity/Hungarian matching (already tolerant of missing/extra detections per frame),
+    then read the final slot off the fixed slot grid (TRACK_SLOT_X/TRACK_ROW_Y) instead of a
+    frame that doesn't exist.
+
+    (Tried 2026-11-22: also assuming a canonical-grid start when no clean start row exists at
+    all, by the same reasoning as the end-anchor fix. Reverted - tested against a real logged
+    failure with no start row (20261121_011754), it turned an honest 'no usable row' into a
+    confident WRONG answer (said slot 2; the game's reveal says slot 1). 'uncertain' is the
+    correct, safe output when the data genuinely doesn't support a claim - this function must
+    not trade an honest None for a false-confidence wrong guess, which is the exact bug fixed
+    above. Only the END anchor has evidence (two real rounds) justifying the grid-assumption
+    fallback; the START anchor still requires a real clean row.)
+    """
+    n = len(dets)
+    s = next((i for i, d in enumerate(dets) if _in_row(d)), None)
+    if s is None:
+        return None, 'no start row found'
+    e_clean = next((i for i in range(n - 1, -1, -1) if _in_row(dets[i])), None)
+    use_clean_end = e_clean is not None and e_clean > s and e_clean >= s + (n - s) * 0.5
+    e = e_clean if use_clean_end else n - 1
+    if e <= s:
+        return None, 'start row too close to end of recording'
+    pos = np.array(sorted(dets[s], key=lambda p: p[0])[:5] if len(dets[s]) == 5
+                   else sorted(dets[s], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
+    pos = pos[np.argsort(pos[:, 0])]
+    vel = np.zeros((5, 2))
+    last = times[s]
+    coast = 0
+    for i in range(s + 1, e + 1):
+        dt = max(1e-3, times[i] - last)
+        last = times[i]
+        pred = pos + vel * min(dt, 0.25)
+        D = np.array(dets[i]).reshape(-1, 2) if len(dets[i]) else np.zeros((0, 2))
+        if len(D):
+            C = np.linalg.norm(pred[:, None, :] - D[None, :, :], axis=2)
+            C = np.where(C > gate, 1e4, C)
+            r, c = _assign_optimal(C)
+            matched = set()
+            for a, b in zip(r, c):
+                if C[a, b] < 1e4:
+                    vel[a] = 0.35 * vel[a] + 0.65 * np.clip((D[b] - pos[a]) / dt, -400, 400)
+                    pos[a] = D[b]
+                    matched.add(a)
+            for a in range(5):
+                if a not in matched:
+                    pos[a] = pred[a]
+                    vel[a] *= decay
+                    coast += 1
+        else:
+            pos = pred
+            vel *= decay
+            coast += 5
+    if use_clean_end:
+        fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - TRACK_ROW_Y))[:5])
+        fin = fin[np.argsort(fin[:, 0])]
+    else:
+        # Extrapolated-end case: the assumed-settled canonical grid is only trustworthy if the
+        # tracked character has actually STOPPED moving by the last captured frame. Found
+        # 2026-11-22 from a third real failure (different PC): the recording can end while 2+
+        # characters are still visibly sliding into place (the settle animation outlasted the
+        # capture window) - bucketing a still-moving point against the fixed grid is a guess, not
+        # a measurement, and was confidently wrong (said 4; the game's reveal says 1). The tracked
+        # character's own final speed was 233 px/s there, vs 0-59 px/s on the two real rounds
+        # where this same fallback path is already known to behave safely (one of them already
+        # returns 'no majority' from disagreement; the other is the dev fixture, settled, ~0-2
+        # px/s) - well separated, so gate on it instead of guessing.
+        tracked_speed = float(np.linalg.norm(vel[start_slot - 1]))
+        if tracked_speed > MAX_SETTLE_SPEED:
+            return None, 'tracked character still moving at capture end (%.0f px/s)' % tracked_speed
+        fin = np.stack([TRACK_SLOT_X, np.full(5, TRACK_ROW_Y)], axis=1)
+    C = np.linalg.norm(pos[:, None, :] - fin[None, :, :], axis=2)
+    r, c = _assign_optimal(C)
+    m = {int(a): int(b) + 1 for a, b in zip(r, c)}
+    span = e - s
+    mode = 'clean-end' if use_clean_end else 'extrapolated-end'
+    return m.get(start_slot - 1), 'ok (%s, coasted %d/%d track-frames)' % (mode, coast, span)
+
+
+class RoundRecorder:
+    """Records every distinct game frame of the board for a whole 조철 round (start to reveal), in the
+    background, JPEG-encoded as it goes (~40 KB a frame), then saves them with times and labels.
+    Purpose: native-fps, self-labelled footage of the CURRENT game for offline tuning on a Mac.
+    Never blocks or alters the solver; every failure is swallowed."""
+    KEEP_ROUNDS = 40
+
+    def __init__(self, hwnd, grab_fn=None, max_fps=MAX_REC_FPS, quality=92, max_seconds=45.0):
+        self.hwnd, self.grab_fn, self.max_fps, self.quality, self.max_seconds = hwnd, grab_fn, max_fps, quality, max_seconds
+        self.frames, self.times = [], []
+        self._stop = threading.Event()
+        self._thread = None
+        self.t0 = None
+        self.mode = None
+
+    def start(self):
+        self.t0 = time.perf_counter()
+        self._thread = threading.Thread(target=self._run, daemon=True, name='jochul-recorder')
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3.0)
+
+    def _run(self):
+        try:
+            import cv2
+            sess = None
+            try:
+                import wgc
+                if wgc.available():
+                    s = wgc._session(self.hwnd)
+                    if s is not None and isinstance(getattr(s, 'frames', None), int):
+                        sess = s
+            except Exception:
+                sess = None
+            self.mode = 'wgc-every-frame' if sess is not None else 'poll-30hz'
+            last_seq, last_t, next_poll = -1, -1.0, time.perf_counter()
+            min_gap = 1.0 / self.max_fps
+            while not self._stop.is_set():
+                now = time.perf_counter()
+                if now - self.t0 > self.max_seconds:
+                    break
+                f = None
+                if sess is not None:
+                    if sess.frames == last_seq or now - self.t0 - last_t < min_gap * 0.9:
+                        time.sleep(0.001)
+                        continue
+                    info = sess.client_frame_info()
+                    last_seq = sess.frames if info is None else info[2]
+                    f = info[0] if info is not None else None
+                else:
+                    if now < next_poll:
+                        time.sleep(0.002)
+                        continue
+                    next_poll = now + 1.0 / 30.0
+                    f = self.grab_fn() if self.grab_fn else None
+                if f is None:
+                    continue
+                if (f.shape[1], f.shape[0]) != (REF_W, REF_H):
+                    f = cv2.resize(f, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+                ok, buf = cv2.imencode('.jpg', crop_region(f), [cv2.IMWRITE_JPEG_QUALITY, self.quality])
+                if ok:
+                    last_t = time.perf_counter() - self.t0
+                    self.frames.append(buf.tobytes())
+                    self.times.append(round(last_t, 4))
+        except Exception:
+            pass
+
+    def save(self, base_dir, meta):
+        import json
+        import os
+        import shutil
+        try:
+            if not self.frames:
+                return None
+            os.makedirs(base_dir, exist_ok=True)
+            d = os.path.join(base_dir, time.strftime('round_%Y%m%d_%H%M%S'))
+            os.makedirs(d, exist_ok=True)
+            for i, b in enumerate(self.frames):
+                with open(os.path.join(d, '%05d.jpg' % i), 'wb') as fh:
+                    fh.write(b)
+            m = dict(meta)
+            m.update({'times': self.times, 'frames': len(self.frames), 'mode': self.mode, 'region': list(REGION),
+                      'seconds': round(self.times[-1], 2) if self.times else 0,
+                      'effective_fps': round(len(self.frames) / max(0.1, self.times[-1]), 1) if self.times else 0})
+            with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as fh:
+                json.dump(m, fh, ensure_ascii=False, default=str)
+            dirs = sorted(x for x in os.listdir(base_dir) if x.startswith('round_'))
+            for old in dirs[:-self.KEEP_ROUNDS]:
+                shutil.rmtree(os.path.join(base_dir, old), ignore_errors=True)
+            return d
+        except Exception:
+            return None
+
+===== docs/JOCHUL_FINDINGS.md (    8570 bytes) =====
+# 조철 암행어사 — what the game actually does (from real footage, 2026-11-20)
+
+Source: YouTube FG723pxOhO8 (2020, 960x720, ~11 distinct frames/s), six rounds. Start slot = slot under the gold 마패
+at the start (read by the medallion-colour detector, consistent over ~15 frames per round). End slot = where the medallion
+sits in the last ~4.5 s, same detector. NOT checked by eye (the image-description tool returned no text for these frames).
+
+| round | start slot | end slot |
+|---|---|---|
+| 1 | 4 | 2 |
+| 2 | 5 | 4 |
+| 3 | 4 | 4 |
+| 4 | 4 | 5 or 3 (ambiguous: 15 vs 13 votes) |
+| 5 | 1 | 5 or 3 (ambiguous: 14 vs 10 votes) |
+| 6 | 5 | 4 (17 of 36 votes; others scattered) |
+
+## Mechanics
+- 5 identical characters stand in a row (x = 65,145,225,305,385 in the 447x351 board crop, y~140), a counter counts 5 -> 0
+  and the 마패 floats over one of them (bobbing: visible in ~40% of frames).
+- At 0 the characters scatter for ~8 s: they run around, change hair/body colour, scale up and down (depth), overlap each
+  other, and animals (bear, tiger, horse, wolf) run through. The scene tint changes (green / blue / orange / white).
+  There are NO clean pairwise swaps.
+- Then they line up again (colours still random for a moment), a 10 s answer timer starts, the player clicks one.
+  The 마패 then re-appears above the real holder (green highlight) = free ground truth for every round.
+- Board layout matches the macro's coordinates (CLICK_X - 287, CLICK_Y - 231) to within 4 px.
+
+## Measured on those six rounds
+- Old macro pipeline (15 fps sampling + swap-pair decoder): 0/6 against the end slots above (rounds 4-5 count either candidate wrong) (it only ever finds 10-11 "swaps").
+- My all-frames swap decoder: not applicable (the game has no swaps).
+- Two tracking-by-detection prototypes on the YOLO detections (Hungarian + constant velocity; min-cost flow over all
+  frames): 1/6 and 0-1/6 = chance. The detector sees on average 3.8-4.2 of the 5 characters per frame in the scatter.
+- Start slot by gold-medallion colour (skin independent), voted over frames: 6/6, no false votes
+  (the old navy-hair pixel pattern found nothing on this footage; it is specific to one skin).
+
+## What is needed for a real solver
+Real-rate (60 fps) capture of live rounds. `brain._handle_jochul` already saves every failed round to `debug/jochul_fail`
+and now also stores `start_slot` and `reveal_slot` in its meta, so each round labels itself.
+
+## More attempts on the same six rounds (2026-11-20, later)
+- Ultralytics built-in trackers (ByteTrack, BoT-SORT) on `jochul.pt`, 256/640 px: identities are reassigned 160-300 times per
+  round, the start character's id never survives to the end (0/4 on the rounds with a certain end slot).
+- OpenCV MOG2 (and a median background) + Norfair Kalman tracker, 32 parameter settings: best 1/4 = chance. In the scatter the
+  foreground gives only ~2-4 separate blobs per frame (characters overlap each other and animals), so tracks die and are
+  re-created (60-120 ids per round).
+- Caveat for all of these: the clip has ~11 distinct frames/s. Live 60 fps footage may track far better; unproven.
+- New skin (pink twin-tail girls, user screenshot): `jochul.pt` finds all 5 (class 0, conf 0.86-0.93) - the model already
+  covers more than one skin. The gold-colour medallion rule (V >= 170, area >= 60) does NOT find the medallion in that
+  screenshot (darker, smaller): the start-slot rule is validated only on the 2020 clip's rendering.
+
+## Design note from the user (another model's advice), assessed 2026-11-20
+Proposal: clean background plate (or MOG2 with learningRate 0) + top-5 blobs + constant-velocity prediction + Hungarian
+matching + coasting while blobs merge + `mss` capture at 60-120 fps + key by template match.
+- Already tried on the real clip (Hungarian tracker, min-cost flow, MOG2/median + Norfair): chance level at ~11 fps.
+- Untested and still plausible: the same pipeline at 60+ fps live. The only thing not yet measured.
+- Does not fit this game as written: no fixed clean plate (hay-bale positions differ per round), "5 largest blobs" breaks when
+  animals cross, the key template must not depend on the skin.
+- Next step stays: native-fps rounds with `start_slot`/`reveal_slot` labels, then replay on the Mac.
+
+## Round recorder (shipped in 1.0.1, 2026-11-20)
+Every 조철 round is now recorded in the background, every distinct frame (WGC frame counter, up to 45/s), JPEG q92 of the
+board region, to `debug/jochul_rounds/round_<time>/` (`NNNNN.jpg` + `meta.json`: times, start slot, answer, marker votes,
+reveal slot, effective fps, capture mode). Last 40 rounds are kept, ~30-50 MB each. Disable with `jochul_record: false`.
+To tune: copy the folder to the Mac and run `python dev/tools/jochul_replay.py <folder>` (tracker vs reveal labels).
+The pink-skin screenshot shows the gold-colour reveal read fails there; in that case label by eye from the last frames.
+
+## First live round on 1.0.1 (client PC, 2026-11-20 15:37, native 44.4 fps, 1033 frames, wgc-every-frame)
+- Start slot 2 (medallion rule found it on this skin: 3 votes). Macro decoded 15 swaps, clicked slot 5.
+- Ground truth: slot 5 (user watched the recorded video and confirmed the macro was correct). n = 1, so this proves nothing about
+  the solver: a random click is right 20% of the time.
+- After the click: the clicked character turns green, the 마패 shows over it, the board closes ~1.7 s later. The macro's reveal read
+  was moved from +3 s to +0.9 s because the board is already gone at +3 s. The old "popup gone = passed" check is not a
+  correctness signal (the board closes either way; unverified whether a wrong click looks different).
+- Detector on native-fps frames: Ultralytics `jochul.pt` finds all 5 in the row at the start/end (100%), 4.5 of 5 per frame in
+  the scatter (58% of frames show all 5). Background-blob foreground: only 2.3 blobs per frame.
+- Offline tracker (dev/tools/jochul_replay.py) on this round: YOLO detections + velocity Hungarian -> slot 5 in 8/9 settings at
+  44 fps, 7/9 at 22 fps and at 11 fps; blob foreground -> 3/9. Agreement with the truth on ONE round only.
+- Needed before changing the macro: more labelled rounds (copy `debug/jochul_rounds`, label by watching the video).
+
+## Replaced the swap-model decoder with a velocity/Hungarian centroid tracker as the live answer (2026-11-20)
+Ran the actual solver code (not an offline experiment) against the ONE real, user-confirmed-correct client
+round (start slot 2, true end slot 5): BOTH swap-model decoders got it WRONG, under every tuning tried
+(`periodic_decode` on the 15fps-resampled grid -> 1; `dp_decode`, time-based, period range widened up to 3 s
+-> 3 or 4, never 5). The live macro's earlier "correct" click with this exact algorithm was therefore very
+likely luck (n=1, 20% baseline), not the solver working, which matches the user calling the success rate
+"so shit".
+
+A much simpler method already written for offline replay - velocity-predicted Hungarian matching of the
+YOLO detector's own centroids (`jochul.track_centroids`, ported from `dev/tools/jochul_replay.py`'s
+`track()`, scipy replaced with a tiny brute-force 5x5-ish assignment since scipy is not bundled in the app) -
+got this SAME round right in all 9 parameter combinations tried (gate in {100,150,220} x decay in
+{0.6,0.8,0.95}), both with scipy and with the ported scipy-free assignment, and even on a 1-in-5 subsampled
+version of the capture (207 of the 1033 frames). This is now the PRIMARY live answer
+(`JochulSolver.solve_tracked`, wired into `brain._handle_jochul_inner`). `periodic_decode` is still run and
+logged for comparison on every round (and a mismatch between the two triggers the same frame-dump/upload
+path as before), but it no longer decides the click.
+
+The capture feeding the solve step changed too: `jochul.record()` (old, fixed 15 fps / 13.5 s polling loop)
+was replaced with `jochul.record_all()` (same all-native-frame capture the evidence recorder already used),
+since the tracker needs real motion, not a coarse sample.
+
+Caveat: n=1 confirmed round. 9/9 parameter robustness on that one case is evidence of being clearly less
+fragile than the swap decoders (which were wrong AND unstable across tunings), not a proven accuracy number.
+A real hit rate still needs many more labelled live rounds - every round keeps recording as before
+(`debug/jochul_rounds`), and the fixture `dev/fixtures/jochul_round1` now also serves as a permanent
+regression test (`dev/test_jochul_tracker.py`) so this exact real case can never silently regress.
+
+===== capture.py (   17954 bytes) =====
+# Decompiled with PyLingual (https://pylingual.io)
+# Internal filename: 'capture.py'
+# Bytecode version: 3.11a7e (3495)
+# Source timestamp: 2026-09-14 10:45:15 UTC (1789382715)
+
+from __future__ import annotations
+import ctypes
+import ctypes.wintypes
+import os
+import threading
+import time
+from collections import deque
+import cv2
+import numpy as np
+import win32con
+import win32gui
+import win32process
+import wgc
+PROCESS_NAME = 'gersang.exe'
+REF_W, REF_H = (1024, 768)
+
+gdi32 = ctypes.WinDLL('gdi32', use_last_error=True)
+user32 = ctypes.WinDLL('user32', use_last_error=True)
+kernel32 = ctypes.windll.kernel32
+BI_RGB = 0
+DIB_RGB_COLORS = 0
+class BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [('biSize', ctypes.wintypes.DWORD), ('biWidth', ctypes.wintypes.LONG), ('biHeight', ctypes.wintypes.LONG), ('biPlanes', ctypes.wintypes.WORD), ('biBitCount', ctypes.wintypes.WORD), ('biCompression', ctypes.wintypes.DWORD), ('biSizeImage', ctypes.wintypes.DWORD), ('biXPelsPerMeter', ctypes.wintypes.LONG), ('biYPelsPerMeter', ctypes.wintypes.LONG), ('biClrUsed', ctypes.wintypes.DWORD), ('biClrImportant', ctypes.wintypes.DWORD)]
+class BITMAPINFO(ctypes.Structure):
+    _fields_ = [('bmiHeader', BITMAPINFOHEADER), ('bmiColors', ctypes.wintypes.DWORD * 3)]
+_W = ctypes.wintypes
+_c_int = ctypes.c_int
+gdi32.CreateCompatibleDC.argtypes = [_W.HDC]
+gdi32.CreateCompatibleDC.restype = _W.HDC
+gdi32.CreateCompatibleBitmap.argtypes = [_W.HDC, _c_int, _c_int]
+gdi32.CreateCompatibleBitmap.restype = _W.HBITMAP
+gdi32.SelectObject.argtypes = [_W.HDC, _W.HGDIOBJ]
+gdi32.SelectObject.restype = _W.HGDIOBJ
+gdi32.BitBlt.argtypes = [_W.HDC, _c_int, _c_int, _c_int, _c_int, _W.HDC, _c_int, _c_int, _W.DWORD]
+gdi32.BitBlt.restype = _W.BOOL
+gdi32.GetDIBits.argtypes = [_W.HDC, _W.HBITMAP, _W.UINT, _W.UINT, ctypes.c_void_p, ctypes.POINTER(BITMAPINFO), _W.UINT]
+gdi32.GetDIBits.restype = _c_int
+gdi32.DeleteObject.argtypes = [_W.HGDIOBJ]
+gdi32.DeleteObject.restype = _W.BOOL
+gdi32.DeleteDC.argtypes = [_W.HDC]
+gdi32.DeleteDC.restype = _W.BOOL
+user32.GetDC.argtypes = [_W.HWND]
+user32.GetDC.restype = _W.HDC
+user32.ReleaseDC.argtypes = [_W.HWND, _W.HDC]
+user32.ReleaseDC.restype = _c_int
+def _get_process_exe(pid: int) -> str:
+    PROCESS_QUERY_LIMITED_INFORMATION = 4096
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return ''
+    else:
+        try:
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            size = ctypes.wintypes.DWORD(ctypes.wintypes.MAX_PATH)
+            ok = kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
+            return buf.value.lower() if ok else ''
+        finally:
+            kernel32.CloseHandle(handle)
+def find_windows(process_name: str=PROCESS_NAME) -> list:
+    """Enumerates all game windows for this process name. When GATO_TARGET_PID
+    is set (one real game client per account under 다클), this restricts the
+    result to that single PID's window(s) -- without it, the first multi-
+    instance run would have N bot processes all race to grab whichever
+    window EnumWindows happens to return first, each controlling a RANDOM
+    account's client instead of its own. Each bot process for 다클 must be
+    launched with its own GATO_TARGET_PID pointing at the pid it actually
+    logged into.
+
+    A single Gersang.exe process owns several windows (the real game window
+    titled exactly 'Gersang', plus helper windows like 'GDI+ Window
+    (Gersang.exe)' and 'DIEmWin' that also have a non-empty title and so
+    also pass the old filter). Observed live 2026-11-18: right after
+    launch, EnumWindows can return the helper window before the real one,
+    and the helper window stays at a degenerate 1x1 client rect forever --
+    callers that grab the first match get a window that will never show
+    real content. Sort results so an exact title match ('Gersang') comes
+    first, which is stable regardless of enumeration order.
+    """
+    target_pid = os.environ.get('GATO_TARGET_PID')
+    target_pid = int(target_pid) if target_pid else None
+    result = []
+    def _enum(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        else:
+            if win32gui.GetWindowTextLength(hwnd) == 0:
+                return
+            else:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if target_pid is not None and pid != target_pid:
+                    return
+                if _get_process_exe(pid).lower().endswith('\\' + process_name.lower()):
+                    result.append(hwnd)
+    win32gui.EnumWindows(_enum, None)
+    result.sort(key=lambda h: 0 if win32gui.GetWindowText(h) == 'Gersang' else 1)
+    return result
+def find_window(process_name: str=PROCESS_NAME) -> int:
+    result = find_windows(process_name)
+    return result[0] if result else 0
+def grab_once(process_name: str=PROCESS_NAME, normalize: bool=True) -> 'np.ndarray | None':
+    return grab_hwnd(find_window(process_name), normalize=normalize)
+def grab_hwnd_after(hwnd: int, after: float, timeout: float=0.25, stop=None, normalize: bool=True) -> 'np.ndarray | None':
+    if not hwnd or (stop is not None and stop()):
+        return None
+    else:
+        bgr = wgc.grab_after(hwnd, after, timeout=timeout, stop=stop)
+        if bgr is None:
+            return
+        else:
+            h, w = bgr.shape[:2]
+            if normalize and (w, h) != (REF_W, REF_H):
+                    bgr = cv2.resize(bgr, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+            return None if stop is not None and stop() else bgr
+def grab_hwnd(hwnd: int, normalize: bool=True) -> 'np.ndarray | None':
+    if not hwnd:
+        return None
+    bgr = wgc.grab(hwnd)
+    if bgr is not None:
+        h, w = bgr.shape[:2]
+        if normalize and (w, h) != (REF_W, REF_H):
+            bgr = cv2.resize(bgr, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+        return bgr
+    try:
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+    except win32gui.error:
+        return None
+    w, h = (right - left, bottom - top)
+    if w <= 0 or h <= 0:
+        return None
+    hwnd_dc = user32.GetDC(hwnd)
+    if not hwnd_dc:
+        return None
+    mem_dc = hbmp = old = None
+    try:
+        mem_dc = gdi32.CreateCompatibleDC(hwnd_dc)
+        hbmp = gdi32.CreateCompatibleBitmap(hwnd_dc, w, h)
+        old = gdi32.SelectObject(mem_dc, hbmp)
+        if not gdi32.BitBlt(mem_dc, 0, 0, w, h, hwnd_dc, 0, 0, win32con.SRCCOPY):
+            return None
+        buf = ctypes.create_string_buffer(w * h * 4)
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biHeight = -h
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = BI_RGB
+        gdi32.SelectObject(mem_dc, old)
+        lines = gdi32.GetDIBits(mem_dc, hbmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
+        gdi32.SelectObject(mem_dc, hbmp)
+        if lines != h:
+            return None
+        bgra = np.frombuffer(buf, np.uint8).reshape(h, w, 4)
+        bgr = np.ascontiguousarray(bgra[:, :, :3])
+        if normalize and (w, h) != (REF_W, REF_H):
+            bgr = cv2.resize(bgr, (REF_W, REF_H), interpolation=cv2.INTER_AREA)
+        return bgr
+    finally:
+        if mem_dc and old:
+            gdi32.SelectObject(mem_dc, old)
+        if hbmp:
+            gdi32.DeleteObject(hbmp)
+        if mem_dc:
+            gdi32.DeleteDC(mem_dc)
+        user32.ReleaseDC(hwnd, hwnd_dc)
+
+
+def grab_hwnd_region(hwnd: int, x0: int, y0: int, x1: int, y1: int) -> 'np.ndarray | None':
+    if not hwnd:
+        return None
+    try:
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+    except win32gui.error:
+        return None
+    cw, ch = (right - left, bottom - top)
+    if (cw, ch) != (REF_W, REF_H):
+        return None
+    w, h = (x1 - x0, y1 - y0)
+    if w <= 0 or h <= 0 or x1 > cw or y1 > ch:
+        return None
+    f = wgc.grab(hwnd)
+    if f is not None:
+        if f.shape[:2] != (REF_H, REF_W):
+            return None
+        return np.ascontiguousarray(f[y0:y1, x0:x1])
+    hwnd_dc = user32.GetDC(hwnd)
+    if not hwnd_dc:
+        return None
+    mem_dc = hbmp = old = None
+    try:
+        mem_dc = gdi32.CreateCompatibleDC(hwnd_dc)
+        hbmp = gdi32.CreateCompatibleBitmap(hwnd_dc, w, h)
+        old = gdi32.SelectObject(mem_dc, hbmp)
+        if not gdi32.BitBlt(mem_dc, 0, 0, w, h, hwnd_dc, x0, y0, win32con.SRCCOPY):
+            return None
+        buf = ctypes.create_string_buffer(w * h * 4)
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biHeight = -h
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = BI_RGB
+        gdi32.SelectObject(mem_dc, old)
+        lines = gdi32.GetDIBits(mem_dc, hbmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
+        gdi32.SelectObject(mem_dc, hbmp)
+        if lines != h:
+            return None
+        bgra = np.frombuffer(buf, np.uint8).reshape(h, w, 4)
+        return np.ascontiguousarray(bgra[:, :, :3])
+    finally:
+        if mem_dc and old:
+            gdi32.SelectObject(mem_dc, old)
+        if hbmp:
+            gdi32.DeleteObject(hbmp)
+        if mem_dc:
+            gdi32.DeleteDC(mem_dc)
+        user32.ReleaseDC(hwnd, hwnd_dc)
+
+
+class CaptureEngine:
+    REFIND_INTERVAL = 1.0
+    def __init__(self, fps: float=60.0, process_name: str=PROCESS_NAME):
+        self.fps = fps
+        self.process_name = process_name
+        self._hwnd = 0
+        self._pid = 0
+        self._last_find = 0.0
+        self._mem_dc = None
+        self._hbmp = None
+        self._old_bmp = None
+        self._buf = None
+        self._bgra = None
+        self._bmi = None
+        self._size = (0, 0)
+        self._frame_lock = threading.Lock()
+        self._bgr = None
+        self._bgr_ref = None
+        self._frame_out = None
+        self._frame_id = 0
+        self._backend = ''
+        self._last_ok = 0.0
+        self._times = deque(maxlen=32)
+        self._cap_ms = 0.0
+        self._frames = 0
+        self._thread = None
+        self._stop = threading.Event()
+        self._subscribers = []
+    def subscribe(self, fn) -> None:
+        self._subscribers.append(fn)
+    def start(self):
+        if self._thread and self._thread.is_alive():
+                return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True, name='prism-capture')
+        self._thread.start()
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        self._hwnd = 0
+    @property
+    def running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+    @property
+    def hwnd(self) -> int:
+        return self._hwnd
+    STALE_SEC = 1.0
+    def snapshot(self) -> np.ndarray | None:
+        with self._frame_lock:
+            if self._frame_out is None or time.time() - self._last_ok > self.STALE_SEC:
+                return
+            else:
+                return self._frame_out.copy()
+    def jpeg(self, quality: int=70) -> bytes | None:
+        with self._frame_lock:
+            if self._frame_out is None:
+                return
+            else:
+                ok, enc = cv2.imencode('.jpg', self._frame_out, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        return enc.tobytes() if ok else None
+    def wait_new(self, last_id: int, timeout: float = 0.03) -> int:
+        """Block (1 ms steps) until a frame newer than last_id was published; returns the current id."""
+        end = time.perf_counter() + timeout
+        while self._frame_id == last_id and time.perf_counter() < end:
+            time.sleep(0.001)
+        return self._frame_id
+    def stats(self) -> dict:
+        now = time.perf_counter()
+        times = [t for t in self._times if now - t <= 3.0]
+        fps = 0.0
+        if len(times) >= 2:
+            fps = (len(times) - 1) / (times[(-1)] - times[0])
+        w, h = self._size
+        return {'running': self.running, 'window_found': bool(self._hwnd), 'width': w, 'height': h, 'fps': round(fps, 1), 'cap_ms': round(self._cap_ms, 1), 'frames': self._frames, 'frame_id': self._frame_id, 'backend': self._backend}
+    def _loop(self):
+        interval = 1.0 / self.fps
+        next_t = time.perf_counter()
+        try:
+            while not self._stop.is_set():
+                t0 = time.perf_counter()
+                if self._capture_once():
+                    dt = (time.perf_counter() - t0) * 1000.0
+                    self._cap_ms = dt if self._cap_ms == 0 else self._cap_ms * 0.9 + dt * 0.1
+                    self._times.append(time.perf_counter())
+                    self._frames += 1
+                next_t += interval
+                now = time.perf_counter()
+                if next_t <= now:
+                    next_t = now + interval
+                self._stop.wait(next_t - now)
+        finally:
+            self._free_resources()
+
+    def _ensure_hwnd(self) -> int:
+        if self._hwnd and win32gui.IsWindow(self._hwnd):
+            return self._hwnd
+        else:
+            self._hwnd = 0
+            now = time.perf_counter()
+            if now - self._last_find >= self.REFIND_INTERVAL:
+                self._last_find = now
+                self._hwnd = self._find_sticky()
+            return self._hwnd
+    def _find_sticky(self) -> int:
+        wins = find_windows(self.process_name)
+        wgc.prune(wins)
+        if not wins:
+            return 0
+        else:
+            if self._pid:
+                for h in wins:
+                    _, pid = win32process.GetWindowThreadProcessId(h)
+                    if pid == self._pid:
+                        return h
+            h = wins[0]
+            _, self._pid = win32process.GetWindowThreadProcessId(h)
+            return h
+    def _capture_once(self) -> bool:
+        hwnd = self._ensure_hwnd()
+        if not hwnd:
+            return False
+        else:
+            src = wgc.grab(hwnd)
+            if src is not None:
+                self._backend = 'wgc'
+                return self._publish(src)
+            else:
+                if not self._blit_gdi(hwnd):
+                    return False
+                else:
+                    self._backend = 'gdi'
+                    with self._frame_lock:
+                        w, h = self._size
+                        if self._bgr is None or self._bgr.shape[:2] != (h, w):
+                            self._bgr = np.empty((h, w, 3), np.uint8)
+                        cv2.cvtColor(self._bgra, cv2.COLOR_BGRA2BGR, dst=self._bgr)
+                    return self._publish(self._bgr)
+    def _blit_gdi(self, hwnd: int) -> bool:
+        try:
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        except win32gui.error:
+            self._hwnd = 0
+            return False
+        w, h = (right - left, bottom - top)
+        if w <= 0 or h <= 0:
+            return False
+        hwnd_dc = user32.GetDC(hwnd)
+        if not hwnd_dc:
+            return False
+        try:
+            if (w, h) != self._size or self._mem_dc is None:
+                self._create_resources(hwnd_dc, w, h)
+            if not gdi32.BitBlt(self._mem_dc, 0, 0, w, h, hwnd_dc, 0, 0, win32con.SRCCOPY):
+                return False
+            gdi32.SelectObject(self._mem_dc, self._old_bmp)
+            lines = gdi32.GetDIBits(self._mem_dc, self._hbmp, 0, h, self._buf, ctypes.byref(self._bmi), DIB_RGB_COLORS)
+            gdi32.SelectObject(self._mem_dc, self._hbmp)
+            if lines != h:
+                return False
+            return True
+        finally:
+            user32.ReleaseDC(hwnd, hwnd_dc)
+
+    def _publish(self, bgr) -> bool:
+        h, w = bgr.shape[:2]
+        self._size = (w, h)
+        with self._frame_lock:
+            self._bgr = bgr
+            if (w, h) == (REF_W, REF_H):
+                self._frame_out = self._bgr
+            else:
+                if self._bgr_ref is None:
+                    self._bgr_ref = np.empty((REF_H, REF_W, 3), np.uint8)
+                cv2.resize(self._bgr, (REF_W, REF_H), dst=self._bgr_ref, interpolation=cv2.INTER_AREA)
+                self._frame_out = self._bgr_ref
+            self._frame_id += 1
+            self._last_ok = time.time()
+            frame, fid = (self._frame_out, self._frame_id)
+        for fn in self._subscribers:
+            try:
+                fn(frame, fid)
+            except Exception:
+                pass
+        return True
+    def _create_resources(self, hwnd_dc: int, w: int, h: int):
+        self._free_resources()
+        self._mem_dc = gdi32.CreateCompatibleDC(hwnd_dc)
+        self._hbmp = gdi32.CreateCompatibleBitmap(hwnd_dc, w, h)
+        self._old_bmp = gdi32.SelectObject(self._mem_dc, self._hbmp)
+        self._buf = ctypes.create_string_buffer(w * h * 4)
+        self._bgra = np.frombuffer(self._buf, np.uint8).reshape(h, w, 4)
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = w
+        bmi.bmiHeader.biHeight = -h
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = BI_RGB
+        self._bmi = bmi
+        self._size = (w, h)
+    def _free_resources(self):
+        if self._mem_dc:
+            if self._old_bmp:
+                gdi32.SelectObject(self._mem_dc, self._old_bmp)
+            gdi32.DeleteDC(self._mem_dc)
+        if self._hbmp:
+            gdi32.DeleteObject(self._hbmp)
+        self._mem_dc = self._hbmp = self._old_bmp = None
+        self._buf = self._bgra = self._bmi = None
+        self._size = (0, 0)
+if __name__ == '__main__':
+    eng = CaptureEngine()
+    eng.start()
+    time.sleep(2.0)
+    print(eng.stats())
+    frame = eng.snapshot()
+    print('frame:', None if frame is None else frame.shape)
+    eng.stop()
+===== input.py (   15898 bytes) =====
+# Decompiled with PyLingual (https://pylingual.io)
+# Internal filename: 'input.py'
+# Bytecode version: 3.11a7e (3495)
+# Source timestamp: 2026-07-28 09:03:05 UTC (1785229385)
+
+from __future__ import annotations
+import ctypes
+import ctypes.wintypes
+import os
+import queue
+import sys
+import threading
+import time
+import win32api
+import win32con
+import win32gui
+import win32process
+from capture import find_window, REF_W, REF_H
+
+user32 = ctypes.windll.user32
+try:
+    ctypes.windll.winmm.timeBeginPeriod(1)   # 1 ms timer: 60 Hz loops and 4 ms cursor checks need it
+except Exception:
+    pass
+def is_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+def ensure_admin() -> bool:
+    if is_admin():
+        return True
+    else:
+        if os.environ.get('PRISM_NO_ELEVATE') == '1':
+            return False
+        else:
+            script = os.path.abspath(sys.argv[0])
+            pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+            launcher = pyw if os.path.exists(pyw) else sys.executable
+            ret = ctypes.windll.shell32.ShellExecuteW(None, 'runas', launcher, f'\"{script}\"', None, 1)
+            if ret > 32:
+                sys.exit(0)
+            return False
+_ULONG_PTR = ctypes.wintypes.WPARAM
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [('wVk', ctypes.c_ushort), ('wScan', ctypes.c_ushort), ('dwFlags', ctypes.c_ulong), ('time', ctypes.c_ulong), ('dwExtraInfo', _ULONG_PTR)]
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [('dx', ctypes.c_long), ('dy', ctypes.c_long), ('mouseData', ctypes.c_ulong), ('dwFlags', ctypes.c_ulong), ('time', ctypes.c_ulong), ('dwExtraInfo', _ULONG_PTR)]
+class _INPUT(ctypes.Structure):
+    class _U(ctypes.Union):
+        _fields_ = [('ki', _KEYBDINPUT), ('mi', _MOUSEINPUT)]
+    _anonymous_ = ('u',)
+    _fields_ = [('type', ctypes.c_ulong), ('u', _U)]
+_INPUT_MOUSE = 0
+_INPUT_KEYBOARD = 1
+_KEYUP = 2
+_SCANCODE = 8
+_EXTENDED = 1
+_M_LEFTDOWN, _M_LEFTUP = (2, 4)
+_M_RIGHTDOWN, _M_RIGHTUP = (8, 16)
+_M_MOVE = 1
+_M_ABSOLUTE = 32768
+_M_VIRTUALDESK = 16384
+def _send(inp: _INPUT) -> None:
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+def _abs_xy(sx: int, sy: int):
+    vx = user32.GetSystemMetrics(76)
+    vy = user32.GetSystemMetrics(77)
+    vw = user32.GetSystemMetrics(78)
+    vh = user32.GetSystemMetrics(79)
+    nx = int((sx - vx) * 65535 / max(1, vw - 1))
+    ny = int((sy - vy) * 65535 / max(1, vh - 1))
+    return (nx, ny)
+def _key_event(scan: int, flags: int) -> None:
+    inp = _INPUT(type=_INPUT_KEYBOARD)
+    inp.ki = _KEYBDINPUT(0, scan, flags, 0, 0)
+    _send(inp)
+def _vk_event(vk: int, flags: int) -> None:
+    inp = _INPUT(type=_INPUT_KEYBOARD)
+    inp.ki = _KEYBDINPUT(vk, 0, flags, 0, 0)
+    _send(inp)
+def _mouse_event(flags: int, dx: int=0, dy: int=0) -> None:
+    inp = _INPUT(type=_INPUT_MOUSE)
+    inp.mi = _MOUSEINPUT(dx, dy, 0, flags, 0, 0)
+    _send(inp)
+VK = {'enter': 13, 'esc': 27, 'space': 32, 'tab': 9, 'backspace': 8, 'shift': 16, 'ctrl': 17, 'alt': 18, 'up': 38, 'down': 40, 'left': 37, 'right': 39, 'insert': 45, 'delete': 46, 'home': 36, 'end': 35, 'pageup': 33, 'pagedown': 34}
+for _i in range(1, 13):
+    VK[f'f{_i}'] = 112 + _i - 1
+for _c in '0123456789':
+    VK[_c] = ord(_c)
+for _c in 'abcdefghijklmnopqrstuvwxyz':
+    VK[_c] = ord(_c.upper())
+_EXT_KEYS = {'left', 'up', 'pageup', 'pagedown', 'insert', 'end', 'down', 'delete', 'home', 'right'}
+VK_HANGUL = 21
+class Hands:
+    FG_SETTLE = 0.3
+    def __init__(self, hwnd_get=None, log=None):
+        self._hwnd_get = hwnd_get or (lambda: 0)
+        self._log = log or (lambda s: None)
+        self._q = queue.Queue()
+        self._mouse_held = None
+        self._fg_at = 0.0
+        self._pin = None             # (screen_x, screen_y, expires_monotonic): where the cursor must stay
+        self.guard_enabled = False   # set by Brain while the macro runs
+        self.guard_fixes = 0         # times the guard pulled a drifting cursor back
+        self._thread = threading.Thread(target=self._worker, daemon=True, name='prism-hands')
+        self._thread.start()
+        self._guard_thread = threading.Thread(target=self._guard_loop, daemon=True, name='prism-cursor-guard')
+        self._guard_thread.start()
+    def _worker(self):
+        # ***<module>.Hands._worker: Failure: Different control flow
+        while True:
+            try:
+                fn, done, box = self._q.get()
+                try:
+                    box[0] = fn()
+                except Exception as e:
+                    box[0] = False
+                    self._log(f'입력 오류: {type(e).__name__}: {e}')
+            finally:
+                if done is not None:
+                    done.set()
+    PIN_TTL = 2.5
+
+    def _set_pin(self, sx: int, sy: int) -> None:
+        self._pin = (sx, sy, time.monotonic() + self.PIN_TTL)
+
+    def _touch_pin(self) -> None:
+        pin = self._pin
+        if pin is not None:
+            self._pin = (pin[0], pin[1], time.monotonic() + self.PIN_TTL)
+
+    def _guard_loop(self) -> None:
+        """Keeps the cursor on the last commanded point while the macro is acting. If the real
+        mouse (or anything else) moves it, it is put back within ~5 ms, so a cast or click never
+        lands where the cursor drifted to."""
+        pt = ctypes.wintypes.POINT()
+        while True:
+            time.sleep(0.004)
+            pin = self._pin
+            if pin is None or not self.guard_enabled:
+                continue
+            if time.monotonic() > pin[2]:
+                self._pin = None
+                continue
+            user32.GetCursorPos(ctypes.byref(pt))
+            if pt.x != pin[0] or pt.y != pin[1]:
+                user32.SetCursorPos(pin[0], pin[1])
+                self.guard_fixes += 1
+
+    def _do(self, fn, wait: bool):
+        if not wait:
+            self._q.put((fn, None, [None]))
+            return
+        else:
+            done = threading.Event()
+            box = [None]
+            self._q.put((fn, done, box))
+            done.wait(timeout=10.0)
+            return box[0]
+    def _hwnd(self) -> int:
+        hwnd = self._hwnd_get()
+        if hwnd and win32gui.IsWindow(hwnd):
+            return hwnd
+        else:
+            return find_window()
+    def _foreground(self) -> int:
+        hwnd = self._hwnd()
+        if not hwnd:
+            self._log('입력 스킵 — 거상 창 없음')
+            return 0
+        else:
+            if win32gui.GetForegroundWindow() != hwnd:
+                cur_tid = win32api.GetCurrentThreadId()
+                fg = win32gui.GetForegroundWindow()
+                fg_tid = win32process.GetWindowThreadProcessId(fg)[0] if fg else 0
+                attached = False
+                if fg_tid and fg_tid != cur_tid:
+                        attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+                try:
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                    try:
+                        win32gui.SetForegroundWindow(hwnd)
+                    except Exception:
+                        pass
+                finally:
+                    if attached:
+                        user32.AttachThreadInput(cur_tid, fg_tid, False)
+                self._fg_at = time.monotonic()
+                time.sleep(0.15)
+                if win32gui.GetForegroundWindow() != hwnd:
+                    self._log('입력 스킵 — 거상 창 전면 전환 실패')
+                    return 0
+                else:
+                    self._log('전면 전환')
+            if self._fg_at:
+                remain = self.FG_SETTLE - (time.monotonic() - self._fg_at)
+                if remain > 0:
+                    time.sleep(remain)
+            return hwnd
+    def focus_game(self) -> bool:
+        try:
+            return bool(self._foreground())
+        except Exception as e:
+            self._log(f'전면 전환 오류: {e}')
+            return False
+    @staticmethod
+    def _to_screen(hwnd: int, x: int, y: int):
+        try:
+            _, _, cw, ch = win32gui.GetClientRect(hwnd)
+            if cw and ch and ((cw, ch) != (REF_W, REF_H)):
+                        x = x * cw / REF_W
+                        y = y * ch / REF_H
+        except Exception:
+            pass
+        return win32gui.ClientToScreen(hwnd, (int(round(x)), int(round(y))))
+    @staticmethod
+    def _press_key(name: str, hold: float):
+        name = name.lower()
+        scan = user32.MapVirtualKeyW(VK[name], 0)
+        flags = _SCANCODE | (_EXTENDED if name in _EXT_KEYS else 0)
+        _key_event(scan, flags)
+        time.sleep(hold)
+        _key_event(scan, flags | _KEYUP)
+    def move(self, x, y, wait=False):
+        def _fn():
+            hwnd = self._foreground()
+            if not hwnd:
+                return False
+            else:
+                sx, sy = self._to_screen(hwnd, x, y)
+                self._pin = None
+                ok = self._land(sx, sy)
+                if ok:
+                    self._set_pin(sx, sy)
+                return ok
+        return self._do(_fn, wait)
+    def move_nofg(self, x, y, wait=False):
+        def _fn():
+            hwnd = self._hwnd()
+            if not hwnd:
+                return False
+            else:
+                self._pin = None     # explicit park: the cursor guard must not drag it back to the last click point
+                try:
+                    user32.SetCursorPos(*self._to_screen(hwnd, x, y))
+                except Exception:
+                    return False
+                return True
+        return self._do(_fn, wait)
+    @staticmethod
+    def _land(sx: int, sy: int) -> bool:
+        """SetCursorPos, then read the cursor back; retry so a click never fires off-target."""
+        pt = ctypes.wintypes.POINT()
+        for _ in range(4):
+            user32.SetCursorPos(sx, sy)
+            user32.GetCursorPos(ctypes.byref(pt))
+            if pt.x == sx and pt.y == sy:
+                return True
+            time.sleep(0.004)
+        return False
+    def click(self, x, y, button='left', down_ms=0.08, wait=False):
+        def _fn():
+            hwnd = self._foreground()
+            if not hwnd:
+                return False
+            else:
+                sx, sy = self._to_screen(hwnd, x, y)
+                nx, ny = _abs_xy(sx, sy)
+                absf = _M_ABSOLUTE | _M_VIRTUALDESK
+                self._pin = None
+                if not self._land(sx, sy):
+                    self._log(f'클릭 스킵 — 커서 안착 실패 ({sx},{sy})')
+                    return False
+                self._set_pin(sx, sy)            # guard holds the cursor here through the click
+                _mouse_event(_M_MOVE | absf, nx, ny)
+                time.sleep(0.012)
+                if not self._land(sx, sy):
+                    self._log(f'클릭 스킵 — 커서 이탈 ({sx},{sy})')
+                    return False
+                d, u = (_M_LEFTDOWN, _M_LEFTUP) if button == 'left' else (_M_RIGHTDOWN, _M_RIGHTUP)
+                try:
+                    _mouse_event(d | absf, nx, ny)
+                    time.sleep(down_ms)
+                finally:
+                    _mouse_event(u | absf, nx, ny)
+                return True
+        return self._do(_fn, wait)
+    def mouse_hold(self, x, y, button='right', wait=False):
+        def _fn():
+            hwnd = self._foreground()
+            if not hwnd:
+                return False
+            else:
+                sx, sy = self._to_screen(hwnd, x, y)
+                nx, ny = _abs_xy(sx, sy)
+                absf = _M_ABSOLUTE | _M_VIRTUALDESK
+                if not self._land(sx, sy):
+                    self._log(f'홀드 스킵 — 커서 안착 실패 ({sx},{sy})')
+                    return False
+                _mouse_event(_M_MOVE | absf, nx, ny)
+                time.sleep(0.012)
+                _mouse_event((_M_LEFTDOWN if button == 'left' else _M_RIGHTDOWN) | absf, nx, ny)
+                self._mouse_held = button
+                return True
+        return self._do(_fn, wait)
+    def mouse_release(self, button=None, wait=False):
+        def _fn():
+            b = button or self._mouse_held
+            if b:
+                _mouse_event(_M_LEFTUP if b == 'left' else _M_RIGHTUP)
+                self._mouse_held = None
+            return True
+        return self._do(_fn, wait)
+    def press(self, key, hold=0.05, wait=False):
+        def _fn():
+            self._touch_pin()
+            if not self._foreground():
+                return False
+            else:
+                self._press_key(key, hold)
+                return True
+        return self._do(_fn, wait)
+    def key_hold(self, key, wait=False):
+        def _fn():
+            self._touch_pin()
+            if not self._foreground():
+                return False
+            else:
+                n = key.lower()
+                flags = _SCANCODE | (_EXTENDED if n in _EXT_KEYS else 0)
+                _key_event(user32.MapVirtualKeyW(VK[n], 0), flags)
+                return True
+        return self._do(_fn, wait)
+    def key_release(self, key, wait=False):
+        def _fn():
+            n = key.lower()
+            flags = _SCANCODE | (_EXTENDED if n in _EXT_KEYS else 0) | _KEYUP
+            _key_event(user32.MapVirtualKeyW(VK[n], 0), flags)
+            return True
+        return self._do(_fn, wait)
+    def combo(self, *keys, hold=0.05, wait=False):
+        def _fn():
+            if not self._foreground():
+                return False
+            else:
+                mods = [k.lower() for k in keys[:(-1)]]
+                for m in mods:
+                    _key_event(user32.MapVirtualKeyW(VK[m], 0), _SCANCODE)
+                time.sleep(0.02)
+                self._press_key(keys[(-1)], hold)
+                for m in reversed(mods):
+                    _key_event(user32.MapVirtualKeyW(VK[m], 0), _SCANCODE | _KEYUP)
+                return True
+        return self._do(_fn, wait)
+    def keys_together(self, *keys, hold=0.05, wait=False):
+        def _fn():
+            if not self._foreground():
+                return False
+            else:
+                names = [k.lower() for k in keys]
+                for n in names:
+                    flags = _SCANCODE | (_EXTENDED if n in _EXT_KEYS else 0)
+                    _key_event(user32.MapVirtualKeyW(VK[n], 0), flags)
+                time.sleep(hold)
+                for n in reversed(names):
+                    flags = _SCANCODE | (_EXTENDED if n in _EXT_KEYS else 0)
+                    _key_event(user32.MapVirtualKeyW(VK[n], 0), flags | _KEYUP)
+                return True
+        return self._do(_fn, wait)
+    def press_vk(self, vk, shift=False, wait=False):
+        def _fn():
+            if not self._foreground():
+                return False
+            else:
+                if shift:
+                    _key_event(user32.MapVirtualKeyW(VK['shift'], 0), _SCANCODE)
+                _vk_event(int(vk), 0)
+                time.sleep(0.03)
+                _vk_event(int(vk), _KEYUP)
+                if shift:
+                    _key_event(user32.MapVirtualKeyW(VK['shift'], 0), _SCANCODE | _KEYUP)
+                return True
+        return self._do(_fn, wait)
+    def toggle_hangul(self, wait=False):
+        def _fn():
+            if not self._foreground():
+                return False
+            else:
+                _vk_event(VK_HANGUL, 0)
+                time.sleep(0.03)
+                _vk_event(VK_HANGUL, _KEYUP)
+                return True
+        return self._do(_fn, wait)
+    def clear_pending(self):
+        try:
+            while True:
+                fn, done, box = self._q.get_nowait()
+                box[0] = False
+                if done is not None:
+                    done.set()
+        except queue.Empty:
+            return None
+    def release_all(self):
+        self._pin = None
+        self.clear_pending()
+        if self._mouse_held:
+            self.mouse_release(wait=True)
+===== dpi.py (     999 bytes) =====
+# Source Generated with Decompyle++
+# File: dpi.pyc (Python 3.11)
+
+import ctypes
+
+try:
+    ctypes.windll
+    ctypes.WinDLL
+except AttributeError:
+    class _StubDLL:
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+    class _StubLib:
+        def __getattr__(self, name):
+            return _StubDLL()
+    ctypes.windll = _StubLib()
+    ctypes.WinDLL = lambda *a, **k: _StubDLL()
+
+
+def apply():
+    
+    try:
+        u = ctypes.windll.user32
+        u.SetProcessDpiAwarenessContext.restype = ctypes.c_bool
+        u.SetProcessDpiAwarenessContext.argtypes = [
+            ctypes.c_void_p]
+        if u.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return None
+    except Exception:
+        pass
+
+    
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return None
+    except Exception:
+        pass
+
+    
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+        return None
+    except Exception:
+        return None
+
+
+apply()
+
+===== dev/test_jochul_tracker.py (    6483 bytes) =====
+"""jochul.track_centroids / solve_tracked: regression test against a REAL, user-confirmed-correct
+client round (dev/fixtures/jochul_round1), plus synthetic edge cases for _assign_optimal.
+Needs ultralytics+torch (the real model), so it's skipped (not failed) where those aren't installed.
+   python dev/test_jochul_tracker.py"""
+import json
+import os
+import sys
+
+import numpy as np
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import jochul
+
+fails = []
+
+
+def check(name, cond, extra=''):
+    print(('PASS ' if cond else 'FAIL ') + name + ('' if cond else ' -- ' + str(extra)))
+    if not cond:
+        fails.append(name)
+
+
+# --- _assign_optimal: must match brute-force-obvious answers, including RECTANGULAR matrices
+# (fewer detections than tracked points, or more) ---
+sq = np.array([[1.0, 9, 9], [9, 1.0, 9], [9, 9, 1.0]])
+r, c = jochul._assign_optimal(sq)
+check('square matrix: picks the diagonal (cheapest)', list(zip(r.tolist(), c.tolist())) == [(0, 0), (1, 1), (2, 2)], (r, c))
+
+fewer_cols = np.array([[0.0, 9, 9], [9, 0.0, 9], [9, 9, 9], [9, 9, 9]])  # 4 rows, 3 cols
+r, c = jochul._assign_optimal(fewer_cols)
+check('fewer detections than tracked points: assigns exactly 3 (not 4)', len(r) == 3 and len(c) == 3, (r, c))
+check('fewer-cols case still finds the two free cheap matches', set(zip(r.tolist(), c.tolist())) >= {(0, 0), (1, 1)}, (r, c))
+
+fewer_rows = np.array([[0.0, 9, 9, 9], [9, 0.0, 9, 9], [9, 9, 9, 9]])  # 3 rows, 4 cols
+r, c = jochul._assign_optimal(fewer_rows)
+check('more detections than tracked points: assigns exactly 3', len(r) == 3 and len(c) == 3, (r, c))
+
+# --- track_centroids: synthetic case, 5 points where slot 1 and slot 2 gradually swap places
+# (real characters RUN between positions over several frames; a one-frame teleport is not a fair
+# test of a velocity tracker - two positions that are simply occupied, with no motion in between,
+# are genuinely indistinguishable from "nobody moved", which is correct, not a bug) ---
+start_row = [(65, 140), (145, 140), (225, 140), (305, 140), (385, 140)]
+end_row = [(145, 140), (65, 140), (225, 140), (305, 140), (385, 140)]  # 1 and 2 swapped
+times = np.linspace(0.0, 1.0, 12)
+dets = []
+for t in times:
+    f = min(1.0, t / 0.8)
+    dets.append([(65 + f * 80, 140), (145 - f * 80, 140), (225, 140), (305, 140), (385, 140)])
+ans, info = jochul.track_centroids(times, dets, start_slot=1)
+check('synthetic swap (gradual motion): the slot-1 character is tracked to its new slot (2)', ans == 2, (ans, info))
+
+# a start/end row that's never found (always scattered) returns None, not a crash or a guess
+scattered = [[(100, 300)], [(120, 310)]]
+ans, info = jochul.track_centroids(np.array([0.0, 0.5]), scattered, start_slot=1)
+check('no usable row -> None, not a silent wrong guess', ans is None, (ans, info))
+
+# --- ensemble confidence policy: costly wrong clicks need 4/5, not a bare 3/5 majority ---
+policy_solver = jochul.JochulSolver('unused')
+policy_solver.detect_centroids = lambda frames, conf=0.20: [[]]
+original_track = jochul.track_centroids
+try:
+    votes = iter([(5, 'mock')] * 3 + [(1, 'mock')] * 2)
+    jochul.track_centroids = lambda *a, **k: next(votes)
+    ans, info = policy_solver.solve_tracked([None], [0.0], first_slot=2)
+    check('3/5 ensemble split -> uncertain, no weak-majority click', ans is None and '{5: 3, 1: 2}' in info, str((ans, info)))
+
+    votes = iter([(5, 'mock')] * 4 + [(1, 'mock')])
+    jochul.track_centroids = lambda *a, **k: next(votes)
+    ans, info = policy_solver.solve_tracked([None], [0.0], first_slot=2)
+    check('4/5 ensemble consensus -> keep answer', ans == 5 and '{5: 4, 1: 1}' in info, str((ans, info)))
+finally:
+    jochul.track_centroids = original_track
+    del policy_solver.detect_centroids
+
+# --- real labelled round: the one actual client capture confirmed correct by the user ---
+try:
+    import torch  # noqa: F401
+    from ultralytics import YOLO  # noqa: F401
+    HAVE_MODEL = True
+except Exception:
+    HAVE_MODEL = False
+
+if not HAVE_MODEL:
+    print('SKIP real-round test (torch/ultralytics not installed in this interpreter)')
+else:
+    import cv2
+    fdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'jochul_round1')
+    meta = json.load(open(os.path.join(fdir, 'meta.json'), encoding='utf-8'))
+    frames = [cv2.imread(os.path.join(fdir, '%05d.jpg' % i)) for i in range(meta['frames'])]
+    rtimes = np.array(meta['times'])
+    model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               'assets', 'models', 'jochul', 'jochul.pt')
+    solver = jochul.JochulSolver(model_path)
+    solver.preload()
+    ans, info = solver.solve_tracked(frames, rtimes, meta['first'])
+    check('real client round: tracker reaches the user-confirmed correct slot',
+          ans == meta['truth'], (ans, meta['truth'], info))
+
+    t0 = __import__('time').perf_counter()
+    ens_ans, ens_info = solver.solve_tracked(frames, rtimes, meta['first'])
+    ens_dt = __import__('time').perf_counter() - t0
+    check('ensemble vote also reaches the correct slot, well inside the 10 s answer timer',
+          ens_ans == meta['truth'] and ens_dt < 9.0, (ens_ans, ens_dt, ens_info))
+
+    # a case with no usable row at all in ANY setting must come back as "uncertain" (None), not a guess
+    no_data = [[] for _ in frames]
+    solver.detect_centroids = lambda frames, conf=0.20: no_data
+    ans2, info2 = solver.solve_tracked(frames, rtimes, meta['first'])
+    check('no usable detections anywhere -> uncertain (None), not a silent guess', ans2 is None, (ans2, info2))
+    # the swap-model decoders are kept only as a secondary signal - documenting here that they
+    # got this SAME round wrong, so a future change must not quietly swap back to trusting them alone
+    per_std, per_sens = solver._detect_missing(frames)
+    old_ops = jochul.periodic_decode(jochul._resample_uniform(per_std, rtimes.tolist()),
+                                      per_frame_sens=jochul._resample_uniform(per_sens, rtimes.tolist()))
+    old_order = jochul.apply_swaps(old_ops)
+    old_ans = old_order.index(meta['first']) + 1 if meta['first'] in old_order else None
+    print('(for reference) periodic_decode on this same round answers %s (wrong) - not used for the click' % old_ans)
+
+print('FAILED: %s' % fails if fails else 'all passed')
+sys.exit(1 if fails else 0)
+
+===== dev/tools/jochul_replay.py (    5019 bytes) =====
+"""Replay recorded 조철 rounds (debug/jochul_rounds/round_*/ : NNNNN.jpg + meta.json) through an offline tracker and
+score the answer against the labels the macro stored (start_slot / reveal_slot / first / answer).
+
+    python dev/tools/jochul_replay.py path/to/jochul_rounds            (all rounds)
+    python dev/tools/jochul_replay.py path/to/jochul_rounds/round_X     (one round)
+
+Pipeline: background from the scatter phase (median) -> foreground blobs (any colour) -> velocity-predicted
+Hungarian matching with coasting while blobs merge -> where the track that started on the marked slot ends.
+Needs numpy, opencv, scipy. Pure analysis: never touches the game.
+"""
+import json
+import os
+import sys
+
+import cv2
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
+SLOT_X = np.array([65, 145, 225, 305, 385], float)      # board-crop coordinates of the 5 slots
+ROW_Y = 140.0
+
+
+def load_round(d):
+    meta = json.load(open(os.path.join(d, 'meta.json'), encoding='utf-8'))
+    frames = [cv2.imread(os.path.join(d, '%05d.jpg' % i)) for i in range(meta['frames'])]
+    return meta, np.array(meta['times'], float), frames
+
+
+def blobs(mask, amin=350, amax=5200):
+    m = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    n, _, st, cen = cv2.connectedComponentsWithStats(m, 8)
+    return [np.array(cen[i], float) for i in range(1, n) if amin <= st[i, 4] <= amax and st[i, 2] < 110 and st[i, 3] < 110]
+
+
+def foreground(frames, times, bg_from=0.35, bg_to=0.80, thr=34):
+    T = times[-1]
+    idx = [i for i, t in enumerate(times) if bg_from * T <= t <= bg_to * T] or list(range(len(frames)))
+    med = np.median(np.stack([frames[i] for i in idx]), axis=0).astype(np.int16)
+    return [(np.abs(f.astype(np.int16) - med).max(axis=2) > thr).astype(np.uint8) * 255 for f in frames]
+
+
+def in_row(pts):
+    return len(pts) >= 5 and np.std([p[1] for p in pts]) < 14 and abs(np.median([p[1] for p in pts]) - ROW_Y) < 40
+
+
+def track(times, dets, start_slot, gate=150.0, decay=0.8):
+    """dets: per frame list of (x, y). Returns (final slot of the tracked character, info)."""
+    s = next((i for i, d in enumerate(dets) if in_row(d)), None)
+    e = next((i for i in range(len(dets) - 1, -1, -1) if in_row(dets[i])), None)
+    if s is None or e is None or e <= s:
+        return None, 'no start/end row found'
+    pos = np.array(sorted(dets[s], key=lambda p: p[0])[:5] if len(dets[s]) == 5 else sorted(dets[s], key=lambda p: abs(p[1] - ROW_Y))[:5])
+    pos = pos[np.argsort(pos[:, 0])]
+    vel = np.zeros((5, 2))
+    last = times[s]
+    coast = 0
+    for i in range(s + 1, e + 1):
+        dt = max(1e-3, times[i] - last)
+        last = times[i]
+        pred = pos + vel * min(dt, 0.25)
+        D = np.array(dets[i]).reshape(-1, 2)
+        if len(D):
+            C = np.linalg.norm(pred[:, None, :] - D[None, :, :], axis=2)
+            C = np.where(C > gate, 1e4, C)
+            r, c = linear_sum_assignment(C)
+            matched = set()
+            for a, b in zip(r, c):
+                if C[a, b] < 1e4:
+                    vel[a] = 0.35 * vel[a] + 0.65 * np.clip((D[b] - pos[a]) / dt, -400, 400)
+                    pos[a] = D[b]
+                    matched.add(a)
+            for a in range(5):
+                if a not in matched:
+                    pos[a] = pred[a]
+                    vel[a] *= decay
+                    coast += 1
+        else:
+            pos = pred
+            vel *= decay
+            coast += 5
+    fin = np.array(sorted(dets[e], key=lambda p: abs(p[1] - ROW_Y))[:5])
+    fin = fin[np.argsort(fin[:, 0])]
+    C = np.linalg.norm(pos[:, None, :] - fin[None, :, :], axis=2)
+    r, c = linear_sum_assignment(C)
+    m = {int(a): int(b) + 1 for a, b in zip(r, c)}
+    return m.get(start_slot - 1), 'ok (coasted %d track-frames)' % coast
+
+
+def solve_round(d):
+    meta, times, frames = load_round(d)
+    masks = foreground(frames, times)
+    dets = [blobs(m) for m in masks]
+    start = meta.get('start_slot') or meta.get('first')
+    ans, info = track(times, dets, int(start)) if start else (None, 'no start label')
+    return meta, ans, info
+
+
+def main(path):
+    dirs = [path] if os.path.exists(os.path.join(path, 'meta.json')) else sorted(os.path.join(path, x) for x in os.listdir(path) if x.startswith('round_'))
+    ok = tot = 0
+    for d in dirs:
+        meta, ans, info = solve_round(d)
+        truth = meta.get('reveal_slot') or meta.get('truth')
+        mark = ''
+        if truth:
+            tot += 1
+            ok += (ans == truth)
+            mark = 'OK' if ans == truth else 'WRONG'
+        print('%s: %s fps, start=%s, macro answered=%s, tracker=%s, reveal=%s %s [%s]' % (
+            os.path.basename(d), meta.get('effective_fps'), meta.get('start_slot') or meta.get('first'), meta.get('answer'), ans, truth, mark, info))
+    if tot:
+        print('tracker %d/%d against reveal labels' % (ok, tot))
+
+
+if __name__ == '__main__':
+    main(sys.argv[1] if len(sys.argv) > 1 else '.')
+
+===== dev/fixtures/jochul_round1/meta.json (    2395 bytes) =====
+{
+ "frames": 207,
+ "times": [
+  0.0021,
+  0.1229,
+  0.2349,
+  0.348,
+  0.4575,
+  0.5711,
+  0.6841,
+  0.7967,
+  0.9652,
+  1.0804,
+  1.1937,
+  1.3079,
+  1.433,
+  1.5464,
+  1.6582,
+  1.7687,
+  1.8809,
+  1.9914,
+  2.1016,
+  2.2123,
+  2.3229,
+  2.4325,
+  2.5445,
+  2.6556,
+  2.7654,
+  2.8789,
+  2.9892,
+  3.0995,
+  3.2094,
+  3.3191,
+  3.4305,
+  3.5421,
+  3.6533,
+  3.7671,
+  3.8799,
+  3.9911,
+  4.1029,
+  4.2156,
+  4.3265,
+  4.4387,
+  4.5506,
+  4.6618,
+  4.7735,
+  4.8835,
+  4.9953,
+  5.1173,
+  5.2334,
+  5.345,
+  5.4555,
+  5.5666,
+  5.6775,
+  5.7886,
+  5.8978,
+  6.0063,
+  6.1185,
+  6.2298,
+  6.3402,
+  6.4538,
+  6.5673,
+  6.6779,
+  6.7898,
+  6.9007,
+  7.0111,
+  7.1222,
+  7.2322,
+  7.3439,
+  7.4569,
+  7.5677,
+  7.6831,
+  7.7944,
+  7.9051,
+  8.0159,
+  8.1267,
+  8.2391,
+  8.3612,
+  8.473,
+  8.5842,
+  8.6951,
+  8.8062,
+  8.9177,
+  9.0284,
+  9.1398,
+  9.2502,
+  9.3621,
+  9.4737,
+  9.5856,
+  9.6987,
+  9.8132,
+  9.9225,
+  10.0329,
+  10.1445,
+  10.2544,
+  10.3653,
+  10.4771,
+  10.589,
+  10.7027,
+  10.8143,
+  10.9244,
+  11.0356,
+  11.1472,
+  11.2608,
+  11.3828,
+  11.4935,
+  11.6062,
+  11.7177,
+  11.8298,
+  11.9421,
+  12.0544,
+  12.1657,
+  12.2788,
+  12.3885,
+  12.4995,
+  12.6115,
+  12.7233,
+  12.8348,
+  12.9463,
+  13.0554,
+  13.1665,
+  13.2765,
+  13.3882,
+  13.5013,
+  13.6122,
+  13.7229,
+  13.8327,
+  13.9459,
+  14.0585,
+  14.1687,
+  14.28,
+  14.3916,
+  14.5015,
+  14.6128,
+  14.723,
+  14.8344,
+  14.9458,
+  15.0571,
+  15.1682,
+  15.2778,
+  15.3885,
+  15.4996,
+  15.6099,
+  15.7193,
+  15.8332,
+  15.9442,
+  16.0557,
+  16.1664,
+  16.2792,
+  16.3885,
+  16.5097,
+  16.6232,
+  16.7455,
+  16.8601,
+  16.9753,
+  17.0908,
+  17.2317,
+  17.3509,
+  17.4642,
+  17.5921,
+  17.7057,
+  17.8309,
+  17.9431,
+  18.0559,
+  18.1773,
+  18.2957,
+  18.4068,
+  18.5179,
+  18.6288,
+  18.7396,
+  18.8508,
+  18.9642,
+  19.0752,
+  19.1861,
+  19.2965,
+  19.4129,
+  19.5233,
+  19.6348,
+  19.7454,
+  19.8562,
+  19.967,
+  20.0783,
+  20.1879,
+  20.2989,
+  20.4099,
+  20.5219,
+  20.6329,
+  20.7439,
+  20.8551,
+  20.9649,
+  21.0739,
+  21.1836,
+  21.2953,
+  21.4066,
+  21.5198,
+  21.6317,
+  21.7458,
+  21.8581,
+  21.9691,
+  22.0784,
+  22.1909,
+  22.304,
+  22.4153,
+  22.5339,
+  22.6581,
+  22.767,
+  22.8851,
+  23.0063,
+  23.1172,
+  23.2282
+ ],
+ "first": 2,
+ "truth": 5,
+ "note": "real client round, 2026-11-20, user-confirmed correct answer is slot 5; subsampled 1-in-5 from the original 1033-frame 44fps capture for repo size"
+}
+===== settings.default.json (   28738 bytes) =====
+{
+  "monsters": {
+    "거북궁사": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "건달바의혼": {
+      "squad_counts": [
+        1.0,
+        2.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 90.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "경문신장": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "공작원_다령": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "교룡궁": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "구지모사역술사": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "구지모시녀장": {
+      "squad_counts": [
+        3.5,
+        4.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 80.0,
+      "summon_mode": "non_taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "궁_교룡": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_대호": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_미후": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_사수": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "궁_흉맥": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "귀_염우": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "귀_투적": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "기": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "누에": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "늪지이무기": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_각": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_귀": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_삼": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_성": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_여": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_저": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_필": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "도사_허": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 50.0,
+      "summon_mode": "non_taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "두이": {
+      "squad_counts": [
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": true,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "루드라의혼": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "마후라가의혼": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "백면구미호": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "백안귀": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "벼락의 사령술사": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "center_move_delay": 2.0,
+      "lead_px": 50.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "복수자_샤오링": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "삼미호": {
+      "squad_counts": [
+        7.0,
+        7.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0
+      ],
+      "center_move_delay": 0.5,
+      "lead_px": 80.0,
+      "summon_mode": "non_taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "석사자": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "수룡": {
+      "squad_counts": [
+        1.0,
+        2.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 100.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "신장_경문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "신장_사문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "신장_생문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "신장_휴문": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "실험체발로": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "아디티": {
+      "squad_counts": [
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "악령_수령": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악령_염옥": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악령_전이": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악령_풍마": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "악몽귀": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "악몽지기": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "암령의고주": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "암령의사육사": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "암령의시녀": {
+      "squad_counts": [
+        3.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0,
+        4.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "암령의장로": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "연옥동자": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "염라대왕": {
+      "squad_counts": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "center_move_delay": 2.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "오운_소": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "오운_염": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "오운_전": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "오운_태": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "욕수의사념": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "유물지도": {
+      "squad_counts": [
+        5.0,
+        6.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "use_summon": true,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "taunt"
+    },
+    "유물지도(정예)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "잠식귀(뇌)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "잠식귀(수)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 0.1,
+      "lead_px": 80.0,
+      "summon_mode": "taunt",
+      "use_summon": true,
+      "multi_retreat": true,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "잠식귀(풍)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "잠식귀(화)": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "제사장_허독": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "지식의고룡": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    },
+    "천옥_집행수": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "천옥_천망수": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "summon_mode": "none",
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ]
+    },
+    "현진_장로": {
+      "squad_counts": [
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0,
+        2.0
+      ],
+      "center_move_delay": 1.0,
+      "lead_px": 80.0,
+      "use_summon": false,
+      "multi_retreat": false,
+      "noejeonju": false,
+      "attack_keys": [
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "summon_mode": "none"
+    }
+  },
+  "gm_chat_msg": "",
+  "discord_webhook": "",
+  "discord_token": "",
+  "discord_channel": "",
+  "ntfy_url": "",
+  "notify_whisper": true,
+  "notify_normal": true,
+  "notify_repeat": false,
+  "sched_cycles": 3,
+  "sched_battles": 10,
+  "sched_rest_sec": 600,
+  "current_monster": "건달바의혼",
+  "banja_mode": false,
+  "win_w": 960,
+  "win_h": 660,
+  "auth_id": ""
+}

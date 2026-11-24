@@ -1,0 +1,152 @@
+PWD=/Users/jungjunkim/Projects/gato
+Python 3.9.6
+zsh: command not found: python.exe
+--- py files total:       50
+--- matched files:
+ 110593   46 ./brain.py
+  62620   16 ./combat.py
+  57474   32 ./docs/REMOTE_SPEC.md
+  52564   11 ./prism.py
+  35574   13 ./jochul.py
+  25065   35 ./sniffer.py
+  24299    1 ./detector.py
+  23997    1 ./agent_link.py
+  21789    3 ./sprite_match.py
+  19724    3 ./vision.py
+  17954   21 ./capture.py
+  15898   22 ./input.py
+   8860   10 ./run_gato.py
+   8570   13 ./docs/JOCHUL_FINDINGS.md
+   7924    1 ./docs/COMMERCIAL.md
+   7888    1 ./autosupply.py
+   7628    6 ./second_pw.py
+   7328    3 ./build_windows_nuitka.ps1
+   7173    1 ./notify.py
+   6996    2 ./dev/preview_ui.py
+   6983    2 ./wgc.py
+   6536    8 ./dev/mock/run_jochul_flow.py
+   6483    1 ./dev/test_jochul_tracker.py
+   6474    1 ./docs/설치안내.md
+   5385    1 ./docs/TEST_LOG_2026-11-19.md
+   5019    1 ./dev/tools/jochul_replay.py
+   3458    9 ./watchdog.py
+   3349    1 ./dev/mock/run_jamun_flow.py
+   2829    1 ./dev/mock/mock_loop.py
+   2395    1 ./dev/fixtures/jochul_round1/meta.json
+   2289    2 ./dev/test_jochul_decode.py
+   2028    3 ./dev/selftest_click.py
+   1952    2 ./README.md
+   1764    1 ./install.ps1
+    999    4 ./dpi.py
+    618    1 ./dev/mock/mac_stub.py
+    386    1 ./run.bat
+--- tree:
+./update.py
+./detector.py
+./sprite_match.py
+./ui/index.html
+./ui/fonts/PretendardVariable.woff2
+./tools/hub.py
+./.DS_Store
+./config.py
+./run_gato.py
+./dpi.py
+./prism_settings.json
+./wgc.py
+./watchdog.py
+./requirements.txt
+./vision.py
+./run.bat
+./combat.py
+./prism.py
+./build_windows.ps1
+./net.py
+./build_windows_nuitka.ps1
+./_manifest.txt
+./notify.py
+./server/schema.sql
+./server/.dev.vars
+./server/devtest.py
+./server/README.md
+./server/package-lock.json
+./server/package.json
+./server/.secrets.txt
+./server/wrangler.toml
+./server/.wrangler/state/v3/kv/miniflare-KVNamespaceObject/metadata.sqlite-shm
+./server/.wrangler/state/v3/kv/miniflare-KVNamespaceObject/metadata.sqlite
+./server/.wrangler/state/v3/kv/miniflare-KVNamespaceObject/metadata.sqlite-wal
+./server/.wrangler/state/v3/cache/miniflare-CacheObject/metadata.sqlite-shm
+./server/.wrangler/state/v3/cache/miniflare-CacheObject/metadata.sqlite
+./server/.wrangler/state/v3/cache/miniflare-CacheObject/metadata.sqlite-wal
+./server/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/metadata.sqlite-shm
+./server/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/metadata.sqlite
+./server/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/metadata.sqlite-wal
+./server/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/2c8c43956110374e7f60a8e6d9158623839831ed151c872b4ea8e3f3cd43d08a.sqlite
+./server/.wrangler/state/v3/observability/miniflare-wobs-trace-store/metadata.sqlite-shm
+./server/.wrangler/state/v3/observability/miniflare-wobs-trace-store/metadata.sqlite
+./server/.wrangler/state/v3/observability/miniflare-wobs-trace-store/metadata.sqlite-wal
+./server/.wrangler/state/v3/observability/miniflare-wobs-trace-store/a590acd76969f996ec6e4b599c3c09f58c283a76f2d61392b5d3046caf557602.sqlite-shm
+./server/.wrangler/state/v3/observability/miniflare-wobs-trace-store/a590acd76969f996ec6e4b599c3c09f58c283a76f2d61392b5d3046caf557602.sqlite
+./server/.wrangler/state/v3/observability/miniflare-wobs-trace-store/a590acd76969f996ec6e4b599c3c09f58c283a76f2d61392b5d3046caf557602.sqlite-wal
+./server/.wrangler/state/v3/flagship/miniflare-flagship-FlagshipObject/metadata.sqlite-shm
+./server/.wrangler/state/v3/flagship/miniflare-flagship-FlagshipObject/metadata.sqlite
+./server/.wrangler/state/v3/flagship/miniflare-flagship-FlagshipObject/metadata.sqlite-wal
+./server/.wrangler/state/v3/r2/miniflare-R2BucketObject/metadata.sqlite-shm
+./server/.wrangler/state/v3/r2/miniflare-R2BucketObject/metadata.sqlite
+./server/.wrangler/state/v3/r2/miniflare-R2BucketObject/metadata.sqlite-wal
+./server/src/index.js
+./docs/JAMUN_FINDINGS.md
+./docs/설치안내.md
+./docs/JOCHUL_FINDINGS.md
+./docs/REMOTE_SPEC.md
+./docs/AUTO_RESTART.md
+./docs/COMMERCIAL.md
+./docs/TEST_LOG_2026-11-19.md
+./docs/LINK.md
+./autosupply.py
+./captcha.py
+./README.md
+./brain.py
+./install.ps1
+./traders_ctl.py
+./merc_slots.json
+./capture.py
+./chat.py
+./.gitignore
+./VERSION
+./input.py
+./.github/workflows/build-installer.yml
+./_report.txt
+./second_pw.py
+./dev/tools/bytecode_compare.py
+./dev/tools/jochul_replay.py
+./dev/test_auto_restart.py
+./dev/mock/run_dummy_scenarios.py
+./dev/mock/run_link_test.py
+./dev/mock/mock_loop.py
+./dev/mock/run_jochul_flow.py
+./dev/mock/run_jamun_flow.py
+./dev/mock/mac_stub.py
+./dev/mock/run_update_test.py
+./dev/test_mob_filter.py
+./dev/selftest_click.py
+./dev/test_dummy.py
+./dev/test_modes_hotkeys.py
+./dev/test_jochul_decode.py
+./dev/test_prefight.py
+./dev/test_accuracy.py
+./dev/test_jochul_tracker.py
+./dev/smoke_start.py
+./dev/fixtures/jochul_round1/meta.json
+./dev/preview_ui.py
+./dev/test_revive_popup.py
+./dev/test_license_client.py
+./settings.default.json
+./installer/gato.iss
+./remote_link.py
+./jochul.py
+./agent_link.py
+./sniffer.py
+./agf.py
+./hwid.txt
+./gato.spec

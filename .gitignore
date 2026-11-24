@@ -22,3 +22,5 @@ server/node_modules/
 server/.dev.vars
 server/.secrets.txt
 server/.wrangler/
+_lan/blobs/*.tgz
+dev/re/themida/unpacked_live.exe

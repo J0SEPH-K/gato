@@ -1,0 +1,437 @@
+ ErrorText_Eng.dat
+AKinteractive.cfg
+AOSObjectImageInfo.txt
+AOSObjectPosInfo.txt
+AbyssMonsterSetInfo.txt
+AbyssSkillSequence.txt
+Achievement_Battle.txt
+Achievement_Charactor.txt
+Achievement_Event.txt
+Achievement_Normal.txt
+Achievement_Quest.txt
+AddJewelryItem.txt
+AddSocketItem.txt
+Animal.txt
+ArcheologyStat.txt
+Armor.txt
+AttendancePointStore.txt
+AttendanceReward.txt
+AuctionItemList.txt
+BaekjeTreasure.txt
+BattleEffectPropability.txt
+BattleMapScript.txt
+BattleObjectEdit.txt
+BattlePassiveIcon.txt
+Battle_ChallengeStage.txt
+Battle_Fable.txt
+Battle_Fable_MerList.txt
+Battle_LightTrial.txt
+BeginnerAttendancePointStore.txt
+BeginnerAttendanceReward.txt
+BeginnerPotal.txt
+BeginnerStore.txt
+BelongingItemInfo.txt
+BgmInfo.txt
+BlackMarketAuctionItem.txt
+BlackMarketItem.txt
+BlessingInfo.txt
+CaptchaText.dat
+CashItemInfo.txt
+CashMallUrl.txt
+CastleType.txt
+ChangeTradeItem.txt
+ChaosGate.txt
+ChaosGateItemDamage.txt
+CharGroup.txt
+CharIntroductionText.dat
+CharSecondImpact.txt
+CharText.dat
+CharTitle.txt
+Character List.txt
+Cintamani.txt
+ClothesBuy.txt
+ClothesCraft.txt
+ClothesStrengthen.txt
+CombineSkill.txt
+ContentFavorites.dat
+CraftItem.txt
+CraftItem2.txt
+CraftPurification.txt
+CreateItem.txt
+CreatureItem.txt
+CursorImage.dat
+CursorInfo.dat
+CutSceneInfo.txt
+Decomposition.txt
+DecompositionItem.txt
+Decomposition_Store.txt
+DefaultBossDialog.txt
+DelJewelryItem.txt
+DelSocketItem.txt
+DispositionEffect.txt
+DispositionList.txt
+Dress.txt
+DungeonMap.txt
+Economy.txt
+EffectSound.txt
+Element.txt
+EnchantItem.txt
+EnchantNPC.txt
+EnchantNPCBonus.txt
+EnterEffectInfo.txt
+EquipItemTicket.txt
+Err_BgmInfo.txt
+ErrorCode.txt
+ErrorText.dat
+ErrorText_Eng.dat
+Event_Attendance.txt
+Event_Exchange.txt
+Event_Ger.txt
+Event_HiddenBox.txt
+Event_MonsterBook.txt
+Event_Reward.txt
+Event_Store.txt
+Evolution.txt
+ExChange.txt
+ExamInfo.txt
+ExpForLevelUp.dat
+FableItem.txt
+Facility.txt
+Factory.txt
+FactoryUpgrade.txt
+FailureItem.txt
+Field Object.txt
+FieldHeroInfo.txt
+FieldLoopEffect.txt
+Filter2ndPass.dat
+FirePosition.txt
+Food.txt
+FormationCreateItem.txt
+FormationEffect.txt
+FormationList.txt
+FormationSPRURL.txt
+FourDevaList.txt
+GCSOption.ini
+GameContentStatus.txt
+GameFontInfo.dat
+GameOption.txt
+GameText.dat
+GeneralList.txt
+Gogohak.txt
+Gogohak_Battle_Drop.txt
+Gogohak_Box.txt
+Gogohak_Reward.txt
+GradeForCredit.txt
+GradePropability.txt
+Group.txt
+GroupItem.txt
+GroupItemAbility.txt
+GroupItemEffect.txt
+GroupItemMagic.txt
+GroupItemSpecial.txt
+GuildExp.txt
+GuildHugeBoss.txt
+GuildRankInfo.txt
+GuildResearch.txt
+GuildSkillTree.txt
+GuildStore.txt
+Helmet.txt
+HelpText.dat
+HerbsMap.txt
+HerbsSkill.txt
+HugeBoss.txt
+Humen.txt
+HuntParty.txt
+HuntPartyDefine.txt
+ImgFile.txt
+InfluenceStoreBuyList.txt
+InfluenceStoreSellList.txt
+InfoSmoke.txt
+InnMercenaryQuest.txt
+InnMercenaryQuestData.txt
+IntegratedProduction.txt
+ItemActionInfo.txt
+ItemBook.txt
+ItemSkillNameTable.txt
+ItemSpecialOption.txt
+ItemforField.txt
+JewelryItem.txt
+JobChange.txt
+JsonMagicIndexList.txt
+LegendGeneralList.txt
+LevelMark.txt
+LicenseText.dat
+Liquor.txt
+Load AOSObjectImageInfo.txt
+Load AOSObjectPosInfo.txt
+Load Abmdp.txt
+Load AbyssSkillSequenceParser.txt
+Load AddSocketItem.txt
+Load AttendanceMonthParser.txt
+Load AuctionItemList.txt
+Load BADPParser.txt
+Load BARP.txt
+Load BARParser.txt
+Load BWParser.txt
+Load Battle_ChallengeStage.txt
+Load Battle_Fable.txt
+Load Battle_LightTrial.txt
+Load BeginnerStoreParser.txt
+Load BlackMarketItem.txt
+Load BuffSkillListParser.txt
+Load CDItemDamage.txt
+Load ChangeTradeItem.txt
+Load ChaosGate.txt
+Load CharGroup.txt
+Load CharSecondImpact.txt
+Load Character List.txt
+Load CharacterTransEXP.txt
+Load CheckImageFileChangeParser.txt
+Load CombineSkill.txt
+Load CraftItem.txt
+Load CraftItem2.txt
+Load DECParser.txt
+Load DECSPParser.txt
+Load DungeonMap.txt
+Load Enchant.txt
+Load EquipItemTicket.txt
+Load Evolution.txt
+Load FailureItem.txt
+Load FieldLoopEffect.txt
+Load FourDevaList.txt
+Load GRParser.txt
+Load GUSTOParser.txt
+Load GameContentStatus.txt
+Load General_list.txt
+Load GetJobPaser.txt
+Load Gogohak.txt
+Load Gogohak_Battle_Drop.txt
+Load Gogohak_Box.txt
+Load Gogohak_Reward.txt
+Load GuildExp.txt
+Load GuildPotal.txt
+Load GuildSkillTree.txt
+Load HerbsMap.txt
+Load HerbsSkill.txt
+Load HugeBoss.txt
+Load HuntParty.txt
+Load HuntPartyDefines.txt
+Load InfluenceStoreBuyList.txt
+Load InfluenceStoreSellList.txt
+Load InnMercenaryQuest.txt
+Load InnMercenaryQuestData.txt
+Load IntegratedProduction.txt
+Load JewelryItem.txt
+Load JobQuestExceptionParser.txt
+Load JsonMagicIndexList.txt
+Load LegendGeneralList.txt
+Load LetterQuest.txt
+Load ManufactureList.txt
+Load MercenaryBook.txt
+Load MercenaryLimit.txt
+Load MercenaryList_indo.txt
+Load MercenaryQuest.txt
+Load MercenaryQuestConversation.txt
+Load MonsterGeneralList.txt
+Load MonsterUpperGeneralList.txt
+Load Nata_Point.txt
+Load Nata_Reward.txt
+Load Nata_Skill.txt
+Load OnceSkillListParser.txt
+Load OreMap.txt
+Load PetCharacterInfo.txt
+Load PocketMonsterParser.txt
+Load PointGrade.txt
+Load Quest.txt
+Load RaidGauge.txt
+Load RandomBoxGradeParser.txt
+Load RecallSkillListParser.txt
+Load RecipeItem.txt
+Load Relic.txt
+Load ResonanceItemInfo.txt
+Load Reward.txt
+Load SVSP.txt
+Load SVST.txt
+Load SealExchange.txt
+Load ShamSiegeTable.txt
+Load ShipInfo.txt
+Load SiegeSkillTableParser.txt
+Load Sooryun.txt
+Load Stable.txt
+Load SummonInfo.txt
+Load TextureID.txt
+Load TransEXP.txt
+Load TreasureHunter.txt
+Load VehicleBookParser.txt
+Load WareHouseElementItem.txt
+Load constellationItem.txt
+Load cstl.txt
+Load general_list.txt
+Load weapon_process.txt
+MI_GetJob.txt
+ManufactureList.txt
+MapIndex.txt
+MapIndexForAddedInfo.txt
+MapNPC.txt
+MapPortal.txt
+MapPosition.txt
+MapStore.txt
+MazeMap.txt
+MazeMonsterPoint.txt
+MazePointParser.txt
+MazeReward.txt
+MeanText.dat
+Medicine.txt
+MercenaryInfo.txt
+MercenaryLimit.txt
+MercenaryList.txt
+MercenaryList_indo.txt
+MercenaryQuest.txt
+MercenaryQuestConversation.txt
+Mercenarybook.txt
+MercenarybookReward.txt
+MonsterBook.txt
+MonsterEcologicalMap.txt
+MonsterGeneralList.txt
+MonsterGeneralList_Indo.txt
+MonsterSeal.txt
+MonsterSppressionAni.txt
+MonsterSuppressionMap.txt
+MonsterSuppressionSkillTable.txt
+MonsterUpperGeneralList.txt
+MultiQuestNpc.txt
+NameFilterInfo.dat
+Nata_Buff.txt
+Nata_Point.txt
+Nata_Reward.txt
+Nata_Skill.txt
+NationMusicCode.txt
+NewBlkType.txt
+NpcUprade.txt
+ODParser.txt
+Object.txt
+ObjectBug.txt
+ObjectMarkText.dat
+OnceSkillList.txt
+OnlineBattleMap.dat
+OnlineCommonParserError.txt
+OnlineFontInfo.dat
+OnlineText.dat
+OptionSiegeWarfare.txt
+OrdealDungeon.txt
+OreMap.txt
+OreSkill.txt
+PetCharacterInfo.txt
+PetSetting.dat
+PocketMonGS.txt
+PointGrade.txt
+PortalPassInfo.txt
+ProSkillLevelTable.txt
+Profit.txt
+PronText.dat
+ProtocolList.txt
+QuestLetter.txt
+QuestText.dat
+RaidCorrectionInfo.txt
+RaidGauge.txt
+RandomBoxBattleEffectParser.txt
+RandomBoxGradeParser.txt
+RandomBoxPointParser.txt
+RecallSkillList.txt
+RecipeItem.txt
+RecipePoint.txt
+RecycleItem.txt
+Reinforcement_AdditionalSkill.txt
+Reinforcement_MaterialsData.txt
+Reinforcement_PitySystem.txt
+Reinforcement_StatusData.txt
+Reinforcement_SuccessRate.txt
+Reinforcement_Supplements.txt
+RelationEffectParser.txt
+Relation_LevelUp.txt
+Relation_Passive.txt
+RenovateMecenary.txt
+ResonanceAbilityInfo.txt
+ResonanceItemInfo.txt
+ResonanceOption.txt
+ResultItem.txt
+Revision.txt
+Reward.txt
+RidingUpgrade.txt
+ScrollStoreBuyList.txt
+SeaType.txt
+SealExchange.txt
+SecretInspector.txt
+SettingList.dat
+SettingList_TextType.dat
+ShamSiegeTable.txt
+ShapeAbility.txt
+ShipInfo.txt
+SiegeSkillTable.txt
+SilkRoadItem.txt
+SlanderFilterInfo.dat
+SoldierUp.txt
+Sooryun.txt
+SoulStone_List.txt
+SoulVillageStore.txt
+SoulVillageSupport.txt
+SpecialMonster.txt
+Specific.txt
+Stable.txt
+StarsItem.txt
+Structure Placement.txt
+Succession.txt
+SuccessionSelect.txt
+SuccessionSkill.txt
+SummonInfo.txt
+TableAdvBasicParm.txt
+TableRecipe.txt
+TargetItemType.txt
+TarotResultTable.txt
+Technique_Alchemy.txt
+Technique_Jewelry.txt
+Technique_Smith.txt
+Test_ExpForLevelUp.dat
+TextureID.txt
+TicketInfo.txt
+TileFile.txt
+TipText.dat
+Tool.txt
+Trade.txt
+TransExpItem.txt
+TransExpScroll.txt
+TreasureHunter.txt
+TreasureMap.txt
+Tutorial.txt
+UpgradeToVillain.txt
+Vehicle.txt
+VehicleBook.txt
+VehicleIcon.txt
+VehicleInfo.txt
+VehicleStat.txt
+VillageDealerMessage.txt
+VillageDevelopment.txt
+VillageImagePositionInfo.txt
+VillageInfo.txt
+WareHouseElementItem.txt
+Weapon.txt
+WeaponType.txt
+Weapon_process.txt
+Wing.txt
+WordGameInfo.txt
+accessary.txt
+addjewerlyitem.txt
+armor.txt
+buffSkillList.txt
+constellationItem.txt
+constellationLayout.txt
+constellation_createitem.txt
+ffgsdeac.cks
+grade.txt
+help.txt
+mercenary.txt
+msdisk63.cls
+quest.txt
+rlu.txt
+vsn.dat
+weapon.txt

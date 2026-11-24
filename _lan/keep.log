@@ -1,0 +1,5 @@
+./keep.sh: line 15: 23210 Terminated: 15          python3 server.py dd6506aa855f92131d8cf7b7 8791 >> srv.log 2>&1
+./keep.sh: line 15: 27674 Terminated: 15          python3 server.py dd6506aa855f92131d8cf7b7 8791 >> srv.log 2>&1
+./keep.sh: line 15: 30558 Terminated: 15          python3 server.py dd6506aa855f92131d8cf7b7 8791 >> srv.log 2>&1
+./keep.sh: line 15: 33126 Terminated: 15          python3 server.py dd6506aa855f92131d8cf7b7 8791 >> srv.log 2>&1
+./keep.sh: line 15: 33401 Terminated: 15          python3 server.py dd6506aa855f92131d8cf7b7 8791 >> srv.log 2>&1

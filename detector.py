@@ -214,6 +214,8 @@ def _digit_templates():
         for p in glob.glob(os.path.join(DIGIT_DIR, '*.png')):
             name = os.path.splitext(os.path.basename(p))[0]
             img = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
+            if img is not None and img.ndim == 3:   # cv2 5.0 returns (h, w, 1)
+                img = img[:, :, 0]
             if img is not None and len(name) == 1 and name.isdigit():
                 _digit_tpl[name] = (img > 127).astype(np.float32)
     return _digit_tpl

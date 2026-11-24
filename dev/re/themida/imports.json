@@ -1,0 +1,140 @@
+[
+ {
+  "dll": "kernel32.dll",
+  "functions": [
+   "GetModuleHandleA"
+  ]
+ },
+ {
+  "dll": "USER32.dll",
+  "functions": [
+   "KillTimer"
+  ]
+ },
+ {
+  "dll": "WININET.dll",
+  "functions": [
+   "InternetOpenUrlA"
+  ]
+ },
+ {
+  "dll": "WS2_32.dll",
+  "functions": [
+   "#111"
+  ]
+ },
+ {
+  "dll": "COMCTL32.dll",
+  "functions": [
+   "_TrackMouseEvent"
+  ]
+ },
+ {
+  "dll": "NETAPI32.dll",
+  "functions": [
+   "NetWkstaGetInfo"
+  ]
+ },
+ {
+  "dll": "DINPUT8.dll",
+  "functions": [
+   "DirectInput8Create"
+  ]
+ },
+ {
+  "dll": "IPHLPAPI.DLL",
+  "functions": [
+   "GetAdaptersInfo"
+  ]
+ },
+ {
+  "dll": "SHLWAPI.dll",
+  "functions": [
+   "PathRemoveExtensionA"
+  ]
+ },
+ {
+  "dll": "d3d11.dll",
+  "functions": [
+   "D3D11CreateDevice"
+  ]
+ },
+ {
+  "dll": "D3DCOMPILER_47.dll",
+  "functions": [
+   "D3DReadFileToBlob"
+  ]
+ },
+ {
+  "dll": "d2d1.dll",
+  "functions": [
+   "#1"
+  ]
+ },
+ {
+  "dll": "DWrite.dll",
+  "functions": [
+   "DWriteCreateFactory"
+  ]
+ },
+ {
+  "dll": "WINMM.dll",
+  "functions": [
+   "timeGetTime"
+  ]
+ },
+ {
+  "dll": "VERSION.dll",
+  "functions": [
+   "GetFileVersionInfoA"
+  ]
+ },
+ {
+  "dll": "IMM32.dll",
+  "functions": [
+   "ImmGetIMEFileNameA"
+  ]
+ },
+ {
+  "dll": "d3dx9_43.dll",
+  "functions": [
+   "D3DXVec3Normalize"
+  ]
+ },
+ {
+  "dll": "gdiplus.dll",
+  "functions": [
+   "GdiplusStartup"
+  ]
+ },
+ {
+  "dll": "GDI32.dll",
+  "functions": [
+   "GetDeviceCaps"
+  ]
+ },
+ {
+  "dll": "ADVAPI32.dll",
+  "functions": [
+   "RegCloseKey"
+  ]
+ },
+ {
+  "dll": "SHELL32.dll",
+  "functions": [
+   "ShellExecuteA"
+  ]
+ },
+ {
+  "dll": "ole32.dll",
+  "functions": [
+   "CoInitialize"
+  ]
+ },
+ {
+  "dll": "OLEAUT32.dll",
+  "functions": [
+   "#8"
+  ]
+ }
+]
