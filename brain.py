@@ -1755,9 +1755,35 @@ class Brain:
                     hands.move(x, jochul.CLICK_Y, wait=True)
                     time.sleep(0.3)
                     meta['fg_before'] = _fg_info()
-                    hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                    try:
+                        _pf = cap()
+                        if _pf is not None:
+                            cv2.imwrite(os.path.join(config.JOCHUL_FAIL_DIR, time.strftime('diag_%H%M%S_pre.png')), _pf)
+                            _ps1 = vis._px_sum(_pf, 513, 43, 514, 44)
+                            _ps2 = vis._px_sum(_pf, 514, 43, 515, 44)
+                            _psc = jochul.marker_scores(jochul.crop_region(_pf))
+                            _pscores = ', '.join(f'{k}:{v:.2f}' for k, v in sorted(_psc.items()))
+                            self._log(f'{p}조철 진단 preclick answer={answer} x={x} popuppx={_ps1}/{_ps2} scores={_pscores}')
+                    except Exception as _e:
+                        self._log(f'{p}조철 진단 pre 실패 {_e!r}')
+                    _ok1 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                    self._log(f'{p}조철 진단 click1={_ok1}')
+                    try:
+                        _c = win32api.GetCursorPos()
+                        _wh = win32gui.GetForegroundWindow()
+                        _sx, _sy = hands._to_screen(_wh, x, jochul.CLICK_Y) if _wh else (-1, -1)
+                        self._log(f'{p}조철 진단 커서 {_c} 목표 {_sx},{_sy} fg={_wh}')
+                    except Exception as _e:
+                        self._log(f'{p}조철 진단 커서 실패 {_e!r}')
+                    try:
+                        _p1 = cap()
+                        if _p1 is not None:
+                            self._log(f'{p}조철 진단 post1 popuppx={vis._px_sum(_p1, 513, 43, 514, 44)}/{vis._px_sum(_p1, 514, 43, 515, 44)}')
+                    except Exception:
+                        pass
                     time.sleep(0.3)
-                    hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                    _ok2 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                    self._log(f'{p}조철 진단 click2={_ok2}')
                     meta['fg_after'] = _fg_info()
                     self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x})')
                     time.sleep(0.9)
@@ -1769,6 +1795,22 @@ class Brain:
                         if _rf is not None:
                             meta['reveal_slot'] = jochul.find_marker_slot(jochul.crop_region(_rf))
                             meta['start_slot'] = first
+                            try:
+                                _sc = jochul.marker_scores(jochul.crop_region(_rf))
+                                _best = max(_sc.items(), key=lambda kv: kv[1])
+                                _s1 = vis._px_sum(_rf, 513, 43, 514, 44)
+                                _s2 = vis._px_sum(_rf, 514, 43, 515, 44)
+                                _scores = ', '.join(f'{k}:{v:.2f}' for k, v in sorted(_sc.items()))
+                                self._log(f'{p}조철 진단 reveal={meta["reveal_slot"]} best={_best[0]}:{_best[1]:.3f} popuppx={_s1}/{_s2} scores={_scores}')
+                                cv2.imwrite(os.path.join(config.JOCHUL_FAIL_DIR, time.strftime('diag_%H%M%S_reveal.png')), _rf)
+                            except Exception as _e:
+                                self._log(f'{p}조철 진단 실패 {_e!r}')
+                    except Exception:
+                        pass
+                    try:
+                        _p2 = cap()
+                        if _p2 is not None:
+                            self._log(f'{p}조철 진단 post2 popuppx={vis._px_sum(_p2, 513, 43, 514, 44)}/{vis._px_sum(_p2, 514, 43, 515, 44)}')
                     except Exception:
                         pass
                     time.sleep(2.1)
