@@ -1807,6 +1807,29 @@ class Brain:
                                 self._log(f'{p}조철 진단 실패 {_e!r}')
                     except Exception:
                         pass
+                    # The reveal burst is the medallion over the character the game wants. If it disagrees
+                    # with the slot we picked, our pick was wrong -- the box is still open at this point, so
+                    # correct it right now instead of ending the round wrong (observed live: 5 of 6 rounds
+                    # had reveal != answer and every one of them failed).
+                    _rev = meta.get('reveal_slot')
+                    if _rev and _rev != answer:
+                        try:
+                            if _popup_present():
+                                x2 = jochul.CLICK_X[_rev]
+                                self._log(f'{p}조철 재클릭 — reveal={_rev} (클릭 {answer} 오답), x={x2}')
+                                hands.move(x2, jochul.CLICK_Y, wait=True)
+                                time.sleep(0.15)
+                                hands.click(x2, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                                time.sleep(0.3)
+                                hands.click(x2, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                                meta['first_answer'] = answer
+                                answer = _rev
+                                meta['answer'] = _rev
+                                meta['clicked'] = _rev
+                                meta['reclicked'] = True
+                                time.sleep(0.6)
+                        except Exception as _e:
+                            self._log(f'{p}조철 재클릭 실패 {_e!r}')
                     try:
                         _p2 = cap()
                         if _p2 is not None:
