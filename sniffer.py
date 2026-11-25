@@ -8,6 +8,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 CHAT_PORT = 4011
+MAIN_PORT = 8000
+MAIN_FILTER = f'tcp and (port {CHAT_PORT} or port {MAIN_PORT})'
 DEDUP_SEC = 30
 DUP_GUARD_SEC = 2
 MAX_FRAME = 8192
@@ -111,6 +113,21 @@ class ChatSniffer:
         else:
             self.log(f'''[덤프] 종료 — 본 opcode {len(self._dump_counts)}종''')
         return self._dump
+
+    
+    def _raw_dump(self, direction, sport, dport, payload):
+        """Verbatim hex dump of one main-socket segment, tagged with direction."""
+        if not self._dump or not self._dump_path or not payload:
+            return None
+        key = direction + ':' + str(dport)
+        self._dump_counts[key] = self._dump_counts.get(key, 0) + 1
+        try:
+            with open(self._dump_path, 'a', encoding = 'ascii') as f:
+                f.write(f'''{time.strftime('%H:%M:%S')} dir={direction} sport={sport} dport={dport} len={len(payload)} n={self._dump_counts[key]} body={payload[:512].hex()}\n''')
+            return None
+        except Exception:
+            return None
+
 
     
     def _dump_op(self, opcode, frame):
@@ -281,7 +298,7 @@ class ChatSniffer:
                     continue
                 ready = threading.Event()
                 try:
-                    sniffer = factory(iface=iface, filter=f'''tcp and src port {CHAT_PORT}''', prn=self._on_pkt, store=False, promisc=False, started_callback=ready.set)
+                    sniffer = factory(iface=iface, filter=MAIN_FILTER, prn=self._on_pkt, store=False, promisc=False, started_callback=ready.set)
                     capture = _Capture(sniffer, ready, now, str(getattr(iface, 'description', key)))
                     self._captures[key] = capture
                     sniffer.start()
@@ -388,10 +405,15 @@ class ChatSniffer:
                 return None
             tcp = pkt[self._TCP]
             ip = pkt[self._IP] if pkt.haslayer(self._IP) else pkt[self._IPv6]
-            if int(tcp.sport) != CHAT_PORT:
-                return None
-            key = (ip.src, int(tcp.sport), ip.dst, int(tcp.dport))
+            sport = int(tcp.sport)
+            dport = int(tcp.dport)
             now = time.monotonic()
+            if CHAT_PORT not in (sport, dport):
+                if self._dump:
+                    payload = tcp.payload.do_build()
+                    self._raw_dump('up' if dport == MAIN_PORT else 'down', sport, dport, payload)
+                return None
+            key = (ip.src, sport, ip.dst, dport)
             with self._rx_lock:
                 self._received += 1
                 self._last_packet = now
