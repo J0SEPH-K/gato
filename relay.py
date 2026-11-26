@@ -109,7 +109,19 @@ def build_zip(full: str, every: int = 1, max_bytes: int = MAX_PULL_BYTES) -> byt
             except OSError:
                 continue
             if total + sz > max_bytes:
-                z.writestr('_TRUNCATED.txt', f'stopped at {total} bytes (limit {max_bytes}); use every=N to thin the frames')
+                # A single file bigger than the budget (a 550 MB pktmon .etl) must still
+                # contribute its head, otherwise the pull returns an empty zip.
+                room = max_bytes - total
+                if room > 0:
+                    try:
+                        with open(p, 'rb') as fh:
+                            head = fh.read(room)
+                    except OSError:
+                        head = b''
+                    if head:
+                        z.writestr(os.path.relpath(p, base).replace('\\', '/'), head, compress_type=zipfile.ZIP_STORED)
+                        total += len(head)
+                z.writestr('_TRUNCATED.txt', f'stopped at {total} bytes (limit {max_bytes}); head of {os.path.basename(p)} kept')
                 break
             comp = zipfile.ZIP_STORED if low.endswith(('.png', '.jpg', '.jpeg', '.zip')) else zipfile.ZIP_DEFLATED
             z.write(p, os.path.relpath(p, base).replace('\\', '/'), compress_type=comp)
@@ -243,6 +255,12 @@ class Relay:
                 elif cmd == 'stop':
                     self.api._run_remote('stop', '')
                     self._done(jid, True, 'stop requested')
+                elif cmd == 'dump':
+                    # Arm/disarm the raw port-8000 hex dump. prism._run_remote handles it before the
+                    # input gate, so it works while the bot is hunting. The dump is the only way to
+                    # get a live round's shuffle packet stream off the PC.
+                    r = self.api._run_remote('dump', '')
+                    self._done(jid, True, json.dumps(r))
                 else:
                     self._done(jid, False, 'unknown cmd')
         except Exception as e:

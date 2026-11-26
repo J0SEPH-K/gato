@@ -916,7 +916,7 @@ class RoundRecorder:
             return None
 
 
-SETTLE_SLOTS = [65, 145, 225, 305, 385]
+SETTLE_SLOTS = [67, 144, 231, 311, 391]
 SETTLE_Y = 160
 SETTLE_MARGIN = 20
 SETTLE_GOLD_MIN = 40

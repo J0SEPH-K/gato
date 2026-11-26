@@ -40,6 +40,9 @@ Type: files; Name: "{app}\version.dll"
 [Files]
 Source: "..\dist\Gato\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsVCRedist
+; Npcap is what scapy talks to; without wpcap.dll the packet sniffer cannot open a capture.
+; /winpcap_mode=yes makes it answer to the WinPcap API names the frozen build links against.
+Source: "npcap-installer.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsNpcap
 
 [Icons]
 Name: "{autoprograms}\GATO"; Filename: "{app}\Gato.exe"
@@ -47,9 +50,15 @@ Name: "{autodesktop}\GATO"; Filename: "{app}\Gato.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
+Filename: "{tmp}\npcap-installer.exe"; Parameters: "/S /winpcap_mode=yes"; StatusMsg: "Npcap (packet capture driver)..."; Check: NeedsNpcap; Flags: waituntilterminated
 Filename: "{app}\Gato.exe"; Description: "{cm:LaunchProgram,GATO}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+function NeedsNpcap: Boolean;
+begin
+  Result := not FileExists(ExpandConstant('{sys}\Npcap\wpcap.dll'));
+end;
+
 function NeedsVCRedist: Boolean;
 var
   Installed: Cardinal;

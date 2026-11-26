@@ -57,8 +57,9 @@ class _Capture:
 
 class ChatSniffer:
     
-    def __init__(self, on_chat, log):
+    def __init__(self, on_chat, log, on_main = None):
         self.on_chat = on_chat
+        self.on_main = on_main
         
         def safe_log(message):
             
@@ -153,7 +154,7 @@ class ChatSniffer:
                 return None
             for capture in self._captures.values():
                 self._close_capture(capture)
-            if ((self._alive(c.sniffer) for c in self._captures.values())):
+            if any((self._alive(c.sniffer) for c in self._captures.values())):
                 self.log('채팅 캡처 정리 대기 — 중복 수집기를 만들지 않습니다')
                 return None
             self._captures.clear()
@@ -208,7 +209,7 @@ class ChatSniffer:
     def _warn(self, key, message, interval = 30):
         now = time.monotonic()
         prev = self._warned.get(key)
-        if prev or now - prev >= interval:
+        if prev is None or now - prev >= interval:
             self._warned[key] = now
             self._had_problem = True
             self.log(message)
@@ -268,12 +269,11 @@ class ChatSniffer:
                 if key not in self._wanted:
                     capture.retiring = True
                 if not alive:
-                    while error:
-                        error = getattr(capture.sniffer, 'exception', None)
-                        self._warn('capture:' + key, f'''채팅 캡처 종료 [{capture.label}] — 재시도: {'수신 루프 종료'}''')
-                        failures = self._failures.get(key, 0) + 1
-                        self._failures[key] = failures
-                        self._retry_at[key] = now + min(60, 2 ** min(failures, 6))
+                    error = getattr(capture.sniffer, 'exception', None)
+                    self._warn('capture:' + key, f'''채팅 캡처 종료 [{capture.label}] — 재시도: {type(error).__name__ if error else '수신 루프 종료'}''')
+                    failures = self._failures.get(key, 0) + 1
+                    self._failures[key] = failures
+                    self._retry_at[key] = now + min(60, 2 ** min(failures, 6))
                     self._captures.pop(key)
                     continue
                 if capture.retiring and capture.ready.is_set() and now - capture.opened >= CAPTURE_START_SEC:
@@ -286,7 +286,7 @@ class ChatSniffer:
                     if self._close_capture(capture):
                         self._captures.pop(key)
                     continue
-                if not capture.ready.is_set() and capture.announced:
+                if capture.ready.is_set() and not capture.announced:
                     capture.announced = True
                     self.log(f'''채팅 캡처 열림 [{capture.label}] — 패킷/채팅 수신 대기''')
                 if capture.announced and now - capture.opened > 60:
@@ -340,15 +340,18 @@ class ChatSniffer:
     def _run(self):
         
         try:
-            AsyncSniffer = AsyncSniffer
-            TCP = TCP
-            IP = IP
-            IPv6 = IPv6
-            conf = conf
-            import scapy.all
+            from scapy.all import AsyncSniffer, TCP, IP, IPv6
+            from scapy.config import conf
         except Exception as e:
-            self.log(f'''채팅 스니퍼 초기화 실패 (scapy/npcap): {e}''')
+            import traceback
+            self.log(f'''채팅 스니퍼 초기화 실패 (scapy/npcap): {type(e).__name__}: {e}''')
+            self.log('채팅 스니퍼 트레이스: ' + traceback.format_exc().replace(chr(10), ' | ')[:600])
             return None
+        try:
+            import scapy.arch.windows as _sw
+            self.log('채팅 스니퍼 npcap: wpcap=' + str(getattr(_sw, 'wpcap', None) is not None))
+        except Exception as e:
+            self.log(f'''채팅 스니퍼 npcap 확인 실패: {type(e).__name__}: {e}''')
 
         self._TCP = TCP
         self._IP = IP
@@ -409,8 +412,16 @@ class ChatSniffer:
             dport = int(tcp.dport)
             now = time.monotonic()
             if CHAT_PORT not in (sport, dport):
+                with self._rx_lock:
+                    self._received += 1
+                    self._last_packet = now
+                payload = tcp.payload.do_build()
+                if self.on_main is not None:
+                    try:
+                        self.on_main('up' if dport == MAIN_PORT else 'down', payload)
+                    except Exception:
+                        pass
                 if self._dump:
-                    payload = tcp.payload.do_build()
                     self._raw_dump('up' if dport == MAIN_PORT else 'down', sport, dport, payload)
                 return None
             key = (ip.src, sport, ip.dst, dport)
@@ -493,9 +504,8 @@ class ChatSniffer:
                     stream.next_seq = stream.next_seq + len(fresh) & 0xFFFFFFFF
                     self._append(stream, fresh, now)
                 self._drain_pending(stream, now)
-        if stream.fin_seq or stream.next_seq or _seq_delta(stream.next_seq, stream.fin_seq) >= 0:
+        if stream.fin_seq and stream.next_seq and _seq_delta(stream.next_seq, stream.fin_seq) >= 0:
             self._streams.pop(key, None)
-        return None
         return None
 
     
@@ -584,7 +594,7 @@ class ChatSniffer:
             (length, opcode) = struct.unpack_from('<HH', buf)
             if not 4 <= length <= MAX_FRAME:
                 stream.synced = False
-            continue
+                continue
             if len(buf) < length:
                 if not stream.frame_since:
                     stream.frame_since = now

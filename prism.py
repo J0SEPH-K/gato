@@ -27,6 +27,7 @@ import combat
 import net
 from input import Hands, ensure_admin, is_admin
 from notify import BotPoller, Notifier
+import pktjochul
 from sniffer import ChatSniffer
 from vision import Vision, detect_scene as vision_detect_scene, px_is as vision_px_is, scene_probe as vision_scene_probe
 
@@ -65,7 +66,9 @@ class Api:
         self._chat_lock = threading.Lock()
         self._chat_log = []
         self._chat_seq = 0
-        self.sniffer = ChatSniffer(on_chat=self._on_chat, log=lambda s: self.vision.note('input', s))
+        self.pkt = pktjochul.PktJochul(log=lambda s: self.vision.note('input', s))
+        self.brain.pkt = self.pkt
+        self.sniffer = ChatSniffer(on_chat=self._on_chat, on_main=self.pkt.feed, log=lambda s: self.vision.note('input', s))
         self.sniffer.start()
         self._sched_thread = None
         self._sched_stop = threading.Event()
@@ -141,6 +144,19 @@ class Api:
         self.vision.note('input', msg)
         self.notifier.text(msg)
     def _run_remote(self, cmd: str, arg: str=''):
+        # Packet dump toggle. Handled before the input gate: it is not an input command, so it has
+        # to arm while the bot is hunting (that is the only time there is anything worth dumping).
+        # Written into debug/packets so the relay can pull it straight off the PC.
+        if cmd == 'dump':
+            r = self.toggle_dump()
+            self._note(f"🧪 패킷 덤프 {'ON' if r['dump'] else 'OFF'}" + (f" — {r['path']}" if r['path'] else ''))
+            return {'dump': r['dump'], 'path': r['path']}
+        # Self-update / relaunch. Handled before the input gate: swapping the exe is not an
+        # input command, and the whole point is to push a new build onto a PC nobody is sitting at.
+        if cmd in ('update', 'self_update', 'relaunch', 'restart'):
+            r = self.self_update()
+            self._note('⬆️ 자체 업데이트 ' + ('시작' if r.get('ok') else f'불가 — {r.get("msg")}'))
+            return r
         if cmd in self._INPUT_CMDS and self.brain.running:
             self._note('가동 중에는 입력이 차단됩니다 — 봇을 정지한 뒤 다시 시도하세요')
         else:

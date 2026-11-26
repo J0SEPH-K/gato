@@ -1,0 +1,20 @@
+Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\PyInstaller\lib\modulegraph\modulegraph.py:16: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+2054 INFO: PyInstaller: 5.13.2
+2056 INFO: Python: 3.11.9
+2175 INFO: Platform: Windows-10-10.0.19043-SP0
+4216 INFO: Extending PYTHONPATH with paths
+['Z:\\src', 'Z:\\src']
+4440 INFO: Appending 'binaries' from .spec
+4446 INFO: Appending 'datas' from .spec
+4670 INFO: checking Analysis
+15401 INFO: checking PYZ
+17828 INFO: checking PKG
+17838 INFO: Bootloader Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+17838 INFO: checking EXE
+17945 INFO: checking COLLECT
+18079 INFO: Removing dir Z:\src\dist\Gato
+24327 INFO: Building COLLECT COLLECT-00.toc
+282314 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+X connection to :99 broken (explicit kill or server shutdown).
+X connection to :99 broken (explicit kill or server shutdown).

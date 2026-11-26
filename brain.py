@@ -19,6 +19,7 @@ import traceback
 from datetime import datetime
 import cv2
 import numpy as np
+import win32api
 import win32con
 import win32gui
 import captcha
@@ -257,6 +258,7 @@ class Brain:
         self.battle_count = self._load_count()
         self._prev_fired = set()
         self.jochul_solver = jochul.JochulSolver(config.JOCHUL_MODEL)
+        self.pkt = None   # pktjochul.PktJochul, injected by prism; None in tests
         self.text_reader = captcha.TextReader(config.TEXT_MODEL)
         self.solver_errors = {}
         self._solvers_loading = True
@@ -1556,6 +1558,8 @@ class Brain:
         try:
             return self._handle_jochul_inner(hands, hwnd, tag, park)
         finally:
+            if self.pkt is not None:
+                self.pkt.end()
             if rec is not None:
                 try:
                     time.sleep(0.4)
@@ -1573,6 +1577,8 @@ class Brain:
             return
         else:
             self._log(f'{p}조철 감지 — 풀이 시작')
+            if self.pkt is not None:
+                self.pkt.begin()
             # NOTE: the park move is deliberately NOT awaited here. move_nofg(wait=True) costs a few
             # hundred ms, which is enough to miss the start medallion burst entirely (it can be
             # gone in 0.13 s). Fire it on a thread so the cursor still leaves the board before the
@@ -1659,7 +1665,23 @@ class Brain:
                     ) if rec_hwnd else ([], [])
                     if not self.running:
                         return
-                    answer = st['marker'] or st['locked']
+                    # Deterministic answer first: the server drives the shuffle, so the swap
+                    # sequence is in the port-8000 bytes. Vision (marker / settle) is only the
+                    # fallback when the packet decode does not produce a full permutation.
+                    pkt_answer, pkt_info = (None, 'no recorder')
+                    if self.pkt is not None:
+                        try:
+                            pkt_answer, pkt_info = self.pkt.solve(first)
+                        except Exception as e:
+                            pkt_answer, pkt_info = None, f'{type(e).__name__}: {e}'
+                        self.pkt.end()
+                        self._log(f'{p}조철 패킷 해독 → {pkt_answer} ({pkt_info})')
+                    if pkt_answer is not None:
+                        if st['marker'] is not None and st['marker'] != pkt_answer:
+                            self._log(f'{p}조철 불일치 — 패킷 {pkt_answer} / 마패 {st["marker"]}, 패킷 우선')
+                        answer = pkt_answer
+                    else:
+                        answer = st['marker'] or st['locked']
                     if st['marker']:
                         self._log(f'{p}조철 마패 확정 → {st["marker"]}번 (표 {st["marker_votes"][-8:]})')
                     track_info = ''
@@ -1715,6 +1737,7 @@ class Brain:
                     import net
                     old_answer = decoder_diag.get('answer')
                     meta = {'ver': net.CODE_VER, 'first': first,
+                            'pkt_answer': pkt_answer, 'pkt_info': pkt_info,
                             'n_ops': decoder_diag.get('n_ops'), 'ops': decoder_diag.get('ops', []),
                             'order': decoder_diag.get('order'), 'swap_decoder_answer': old_answer, 'answer': answer,
                             'track_info': track_info, 'settle_votes': st['votes'], 'marker': st['marker'],
