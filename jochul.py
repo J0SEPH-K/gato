@@ -376,11 +376,20 @@ def periodic_decode(per_frame, period=PERIOD, n_ops=N_OPS, per_frame_sens=None):
 def _viol_count(ops):
     return sum((1 for a, b in zip(ops, ops[1:]) if set(a) & set(b)))
 def apply_swaps(ops, init=(1, 2, 3, 4, 5)):
+    """Replay the swap sequence on character labels.
+
+    A swap op names the two characters being moved, not the two board slots, so
+    each op has to be resolved to wherever those characters currently sit before
+    the exchange. Swapping by position (a-1, b-1) is only correct for the very
+    first op of a round and drifts from there - that is what produced the wrong
+    answers (positional replay gave slot 3 on the recorded round while the game's
+    own reveal was slot 1; label replay gives slot 1).
+    """
     lst = list(init)
     for op in ops:
-        if op and len(op) == 2:
-                i, j = (op[0] - 1, op[1] - 1)
-                lst[i], lst[j] = (lst[j], lst[i])
+        if op and len(op) == 2 and op[0] in lst and op[1] in lst:
+            i, j = lst.index(op[0]), lst.index(op[1])
+            lst[i], lst[j] = lst[j], lst[i]
     return lst
 class JochulSolver:
     def __init__(self, model_path):

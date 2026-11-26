@@ -1,1 +1,9 @@
-/bin/bash: line 40: setsid: command not found
+t=2026-11-27T05:16:28+0900 lvl=info msg="no configuration paths supplied"
+t=2026-11-27T05:16:28+0900 lvl=info msg="using configuration at default config path" path="/Users/jungjunkim/Library/Application Support/ngrok/ngrok.yml"
+t=2026-11-27T05:16:28+0900 lvl=info msg="open config file" path="/Users/jungjunkim/Library/Application Support/ngrok/ngrok.yml" err=nil
+t=2026-11-27T05:16:28+0900 lvl=info msg="FIPS 140 mode" enabled=false
+t=2026-11-27T05:16:28+0900 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+t=2026-11-27T05:16:28+0900 lvl=info msg="client session established" obj=tunnels.session
+t=2026-11-27T05:16:28+0900 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-11-27T05:16:28+0900 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:8791 url=https://c9a9-59-12-214-26.ngrok-free.app
+t=2026-11-27T05:16:28+0900 lvl=info msg="update available" obj=updater

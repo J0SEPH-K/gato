@@ -40,9 +40,11 @@ def feed(rec, pairs, op=0x1234, junk=True, chunk=7):
 
 
 def expected(first, pairs):
+    # pairs name characters, so resolve each to its current slot before exchanging
     order = [1, 2, 3, 4, 5]
     for a, b in pairs:
-        order[a - 1], order[b - 1] = order[b - 1], order[a - 1]
+        ia, ib = order.index(a), order.index(b)
+        order[ia], order[ib] = order[ib], order[ia]
     return order.index(first) + 1
 
 
@@ -80,7 +82,21 @@ rec.begin()
 feed(rec, [(1, 2), (2, 3), (3, 4), (4, 5)])
 rec.end()
 got, _info = rec.solve(3)
-chk('slot 3 tracked through a rotation', got == 2, got)   # [2,3,4,5,1] -> slot 3 sits at 2
+# pairs name characters, so (1,2)(2,3)(3,4)(4,5) carries character 3 to slot 4
+chk('slot 3 tracked through a rotation', got == 4, got)
+
+# a real recorded round: the game's own reveal is the ground truth, and the label replay
+# must land on it (positional replay answered 3 here, reveal said 1)
+import json
+_fx = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'jochul_swap_round1', 'meta.json')
+if os.path.exists(_fx):
+    _m = json.load(open(_fx, encoding='utf-8'))
+    _o = [1, 2, 3, 4, 5]
+    for _a, _b in [tuple(x) for x in _m['ops']]:
+        _i, _j = _o.index(_a), _o.index(_b)
+        _o[_i], _o[_j] = _o[_j], _o[_i]
+    chk('recorded round 20261126_232228: label replay matches the game reveal',
+        _o.index(_m['first']) + 1 == _m['reveal_slot'], (_o, _m['reveal_slot']))
 
 # endianness: the LE stream must win over BE on the same bytes
 segs = [(0.0, 'down', frame(0x1234, bytes([1, 2, 3, 0, 0])))] * 8

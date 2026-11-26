@@ -55,6 +55,7 @@ Parsing [InstallDelete] section, line 38
 Parsing [Run] section, line 52
 Parsing [Run] section, line 53
 Parsing [Run] section, line 54
+Parsing [Run] section, line 57
 Parsing [Files] section, line 41
 Parsing [Files] section, line 42
    Reading version info: Z:\src\installer\vc_redist.x64.exe
@@ -15690,5 +15691,7 @@ Creating setup files
    Updating manifest (Setup.exe)
 
 
-Successful compile (265.632 sec). Resulting Setup program filename is:
+Successful compile (255.528 sec). Resulting Setup program filename is:
 Z:\src\dist-installer\GatoSetup.exe
+X connection to :99 broken (explicit kill or server shutdown).
+X connection to :99 broken (explicit kill or server shutdown).

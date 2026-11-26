@@ -159,9 +159,11 @@ class PktJochul:
         if cover < 0.30:
             return None, f'framing never tiled ({cover * 100:.0f}% {endian})'
         pairs = self._pairs(frames)
+        # the pairs name characters, not slots - resolve each to its current position
         order = [1, 2, 3, 4, 5]
         for a, b in pairs:
-            order[a - 1], order[b - 1] = order[b - 1], order[a - 1]
+            ia, ib = order.index(a), order.index(b)
+            order[ia], order[ib] = order[ib], order[ia]
         info = (f'{len(frames)}f {cover * 100:.0f}% {endian} swaps={len(pairs)} '
                 f'seq={pairs[:20]} order={order}')
         return (order, info) if len(pairs) >= 3 else (None, info + ' - too few swaps')
@@ -184,9 +186,11 @@ class PktJochul:
             return None, f'framing never tiled ({cover * 100:.0f}% {endian})'
         ops = Counter(op for op, _f in frames)
         pairs = self._pairs(frames)
+        # the pairs name characters, not slots - resolve each to its current position
         order = [1, 2, 3, 4, 5]
         for a, b in pairs:
-            order[a - 1], order[b - 1] = order[b - 1], order[a - 1]
+            ia, ib = order.index(a), order.index(b)
+            order[ia], order[ib] = order[ib], order[ia]
         info = (f'{len(frames)}f {cover * 100:.0f}% {endian} ops={len(ops)} '
                 f'swaps={len(pairs)} seq={pairs[:20]}')
         if len(pairs) < 3:
