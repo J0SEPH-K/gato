@@ -1670,6 +1670,16 @@ class Brain:
                     # fallback when the packet decode does not produce a full permutation.
                     pkt_answer, pkt_info = (None, 'no recorder')
                     if self.pkt is not None:
+                        # Always persist the raw segments of the round, even when the decode
+                        # abstains. A round that refuses is only fixable by replaying its bytes;
+                        # without this the stream is gone the moment the round ends.
+                        try:
+                            path = os.path.join(config.BASE_DIR, 'debug', 'jochul_pkts',
+                                                time.strftime('pkt_%Y%m%d_%H%M%S.log'))
+                            n = self.pkt.dump(path)
+                            self._log(f'{p}조철 패킷 기록 {n}B → {path}')
+                        except Exception as e:
+                            self._log(f'{p}조철 패킷 기록 실패: {type(e).__name__}: {e}')
                         try:
                             pkt_answer, pkt_info = self.pkt.solve(first)
                         except Exception as e:

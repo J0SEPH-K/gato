@@ -15,6 +15,7 @@ permutation that still contains the start slot.
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import Counter
@@ -70,6 +71,22 @@ class PktJochul:
                 cutoff = now - RING_SEC
                 self._segs = [s for s in self._segs if s[0] >= cutoff]
 
+    def dump(self, path: str) -> int:
+        """Write the recorded segments to disk, one line per TCP payload.
+
+        This is the ground truth for tuning the real frame layout: the decode is
+        only as good as the bytes, and a round that abstains has to be replayable
+        afterwards instead of guessed at. Returns bytes written.
+        """
+        segs = self.snapshot()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        n = 0
+        with open(path, 'w', encoding='ascii') as f:
+            for t, direction, payload in segs:
+                f.write(f'{t:.3f} {direction} {len(payload)} {payload.hex()}\n')
+                n += len(payload)
+        return n
+
     def snapshot(self):
         with self._lock:
             return list(self._segs)
@@ -124,6 +141,30 @@ class PktJochul:
             if pair:
                 out.append(pair)
         return out
+
+    def permutation(self):
+        """(order, info) for the recorded round - the shuffle result itself."""
+        segs = self.snapshot()
+        if not segs:
+            return None, 'no main-port traffic recorded'
+        best = None
+        for endian in ENDIANS:
+            frames, cover = self._tile(segs, endian)
+            key = (cover, len(frames))
+            if best is None or key > best[0]:
+                best = (key, endian, frames, cover)
+        if best is None:
+            return None, 'no framing candidate'
+        _key, endian, frames, cover = best
+        if cover < 0.30:
+            return None, f'framing never tiled ({cover * 100:.0f}% {endian})'
+        pairs = self._pairs(frames)
+        order = [1, 2, 3, 4, 5]
+        for a, b in pairs:
+            order[a - 1], order[b - 1] = order[b - 1], order[a - 1]
+        info = (f'{len(frames)}f {cover * 100:.0f}% {endian} swaps={len(pairs)} '
+                f'seq={pairs[:20]} order={order}')
+        return (order, info) if len(pairs) >= 3 else (None, info + ' - too few swaps')
 
     def solve(self, first_slot: int):
         """Apply the recorded swap sequence to the start slot. (answer, info)."""
