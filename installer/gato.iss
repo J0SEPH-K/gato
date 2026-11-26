@@ -51,7 +51,10 @@ Name: "{autodesktop}\GATO"; Filename: "{app}\Gato.exe"; Tasks: desktopicon
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{tmp}\npcap-installer.exe"; Parameters: "/S /winpcap_mode=yes"; StatusMsg: "Npcap (packet capture driver)..."; Check: NeedsNpcap; Flags: waituntilterminated
-Filename: "{app}\Gato.exe"; Description: "{cm:LaunchProgram,GATO}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Gato.exe"; Description: "{cm:LaunchProgram,GATO}"; Flags: nowait postinstall
+; A silent install (the updater) gets no postinstall page, so skipifsilent alone left the
+; machine with the new build on disk and nothing running. Relaunch unconditionally when silent.
+Filename: "{app}\Gato.exe"; Flags: nowait; Check: WizardSilent
 
 [Code]
 function NeedsNpcap: Boolean;
