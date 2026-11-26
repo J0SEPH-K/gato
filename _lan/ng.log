@@ -7,3 +7,19 @@ t=2026-11-27T05:16:28+0900 lvl=info msg="client session established" obj=tunnels
 t=2026-11-27T05:16:28+0900 lvl=info msg="tunnel session started" obj=tunnels.session
 t=2026-11-27T05:16:28+0900 lvl=info msg="started tunnel" obj=tunnels name=command_line addr=http://localhost:8791 url=https://c9a9-59-12-214-26.ngrok-free.app
 t=2026-11-27T05:16:28+0900 lvl=info msg="update available" obj=updater
+t=2026-11-27T07:02:31+0900 lvl=eror msg="heartbeat timeout, terminating session" obj=tunnels.session obj=csess id=44bac8b32419 clientid=eab195458e267152d43d1e91173310bf
+t=2026-11-27T07:02:31+0900 lvl=eror msg="session closed, starting reconnect loop" obj=tunnels.session obj=csess id=46236c26cac7 err="session closed"
+t=2026-11-27T07:02:31+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T07:02:32+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T07:02:33+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T07:02:35+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T07:09:58+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T07:18:54+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T07:36:05+0900 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to dial ngrok server with address \"connect.ngrok-agent.com:443\": dial tcp: lookup connect.ngrok-agent.com: no such host"
+t=2026-11-27T08:06:09+0900 lvl=info msg="client session established" obj=tunnels.session
+t=2026-11-27T08:06:09+0900 lvl=info msg="tunnel session started" obj=tunnels.session
+t=2026-11-27T08:21:48+0900 lvl=info msg="join connections" obj=join id=418377de12c5 l=127.0.0.1:8791 r=59.14.79.100:22024
+t=2026-11-27T08:23:40+0900 lvl=info msg="join connections" obj=join id=7f22829fae1b l=127.0.0.1:8791 r=59.14.79.100:22879
+t=2026-11-27T08:23:40+0900 lvl=info msg="join connections" obj=join id=9eb23ea17a31 l=127.0.0.1:8791 r=59.14.79.100:22880
+t=2026-11-27T08:26:51+0900 lvl=info msg="join connections" obj=join id=b64d75ab03c5 l=127.0.0.1:8791 r=59.14.79.100:24101
+t=2026-11-27T08:38:35+0900 lvl=info msg="join connections" obj=join id=0070761a50e3 l=127.0.0.1:8791 r=59.14.79.100:27886

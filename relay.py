@@ -255,6 +255,12 @@ class Relay:
                 elif cmd == 'stop':
                     self.api._run_remote('stop', '')
                     self._done(jid, True, 'stop requested')
+                elif cmd in ('start', 'update', 'self_update', 'relaunch', 'restart'):
+                    # Panel-side commands. prism._run_remote handles them before the input gate, but
+                    # relay has to forward them or the queue is a dead end and a PC nobody is
+                    # sitting at can never be started or updated remotely.
+                    r = self.api._run_remote(cmd, '')
+                    self._done(jid, True, json.dumps(r or {}))
                 elif cmd == 'dump':
                     # Arm/disarm the raw port-8000 hex dump. prism._run_remote handles it before the
                     # input gate, so it works while the bot is hunting. The dump is the only way to

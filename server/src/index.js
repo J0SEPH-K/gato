@@ -439,7 +439,7 @@ async function relayAdmin(req, env, url) {
     const o = await readBody(req, 8192);
     if (!o) return json({ ok: false, reason: 'bad_request' }, 400);
     const cmd = String(o.cmd || '');
-    if (!['log', 'shot', 'ls', 'pull', 'stop', 'dump'].includes(cmd)) return json({ ok: false, reason: 'bad_cmd' }, 400);
+    if (!['log', 'shot', 'ls', 'pull', 'stop', 'dump', 'start', 'update', 'relaunch', 'restart'].includes(cmd)) return json({ ok: false, reason: 'bad_cmd' }, 400);
     let machine = String(o.machine || '');
     if (!machine && o.pc) {
       const a = await env.DB.prepare('SELECT machine FROM agents WHERE pc = ? ORDER BY seen DESC LIMIT 1').bind(String(o.pc)).first();
