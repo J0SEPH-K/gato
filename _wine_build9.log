@@ -1,0 +1,195 @@
+Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\PyInstaller\lib\modulegraph\modulegraph.py:16: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+2080 INFO: PyInstaller: 5.13.2
+2080 INFO: Python: 3.11.9
+2201 INFO: Platform: Windows-10-10.0.19043-SP0
+2212 INFO: Removing temporary files and cleaning cache in C:\users\root\AppData\Local\pyinstaller
+4405 INFO: Extending PYTHONPATH with paths
+['Z:\\src', 'Z:\\src']
+4629 INFO: Appending 'binaries' from .spec
+4638 INFO: Appending 'datas' from .spec
+4858 INFO: checking Analysis
+4858 INFO: Building Analysis because Analysis-00.toc is non existent
+4858 INFO: Initializing module dependency graph...
+4872 INFO: Caching module graph hooks...
+4910 INFO: Analyzing base_library.zip ...
+5450 INFO: Loading module hook 'hook-encodings.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+7082 INFO: Loading module hook 'hook-pickle.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+8743 INFO: Loading module hook 'hook-heapq.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+9678 INFO: Caching module dependency graph...
+9841 INFO: running Analysis Analysis-00.toc
+9862 INFO: Adding Microsoft.Windows.Common-Controls to dependent assemblies of final executable
+  required by Z:\opt\wineprefix\drive_c\Python\python.exe
+10322 INFO: Analyzing Z:\src\run_gato.py
+10625 INFO: Loading module hook 'hook-psutil.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+10953 INFO: Loading module hook 'hook-cv2.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+11861 INFO: Loading module hook 'hook-numpy.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+13405 INFO: Loading module hook 'hook-platform.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+13569 INFO: Processing pre-safe import module hook distutils from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module\\hook-distutils.py'.
+13572 INFO: Processing pre-find module path hook distutils from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path\\hook-distutils.py'.
+13709 INFO: Loading module hook 'hook-distutils.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+13772 INFO: Loading module hook 'hook-sysconfig.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+13833 INFO: Loading module hook 'hook-distutils.util.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+14105 INFO: Loading module hook 'hook-multiprocessing.util.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+14552 INFO: Loading module hook 'hook-xml.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+17391 INFO: Loading module hook 'hook-difflib.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+21827 INFO: Loading module hook 'hook-torch.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+31983 INFO: Loading module hook 'hook-sympy.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+33963 INFO: Loading module hook 'hook-matplotlib.py' from 'Z:\\src\\buildhooks'...
+34272 INFO: Loading module hook 'hook-packaging.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+34992 INFO: Loading module hook 'hook-PIL.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+35074 INFO: Loading module hook 'hook-PIL.Image.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+35384 INFO: Loading module hook 'hook-xml.etree.cElementTree.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+35562 INFO: Loading module hook 'hook-PIL.ImageFilter.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+36714 INFO: Loading module hook 'hook-jinja2.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+37430 INFO: Loading module hook 'hook-matplotlib.backends.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+39350 INFO: Loading module hook 'hook-zoneinfo.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+41894 INFO: Processing pre-safe import module hook gi from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module\\hook-gi.py'.
+42037 INFO: Loading module hook 'hook-certifi.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+60594 INFO: Loading module hook 'hook-xml.dom.domreg.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+70571 INFO: Loading module hook 'hook-setuptools.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+71416 INFO: Loading module hook 'hook-jaraco.text.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+72575 INFO: Loading module hook 'hook-importlib_metadata.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+75262 INFO: Loading module hook 'hook-win32com.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+75271 INFO: Loading module hook 'hook-pythoncom.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+75325 INFO: Loading module hook 'hook-pywintypes.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+77203 INFO: Loading module hook 'hook-sqlite3.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+96217 INFO: Loading module hook 'hook-torchvision.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+96546 INFO: Loading module hook 'hook-torchvision.io.image.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+149342 INFO: Loading module hook 'hook-charset_normalizer.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+149579 INFO: Loading module hook 'hook-cryptography.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+166844 INFO: Loading module hook 'hook-webview.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+168692 INFO: Loading module hook 'hook-clr.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+169043 INFO: Loading module hook 'hook-clr_loader.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+169542 INFO: Loading module hook 'hook-pycparser.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+176206 INFO: Loading module hook 'hook-scapy.layers.all.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+176498 INFO: Loading module hook 'hook-websockets.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+177289 INFO: Analyzing hidden import 'win32timezone'
+177312 INFO: Analyzing hidden import 'second_pw'
+177320 INFO: Analyzing hidden import 'watchdog'
+177326 INFO: Analyzing hidden import 'ultralytics.data.annotator'
+177329 INFO: Analyzing hidden import 'ultralytics.data.split_dota'
+177341 INFO: Analyzing hidden import 'ultralytics.hub.google'
+177469 INFO: Analyzing hidden import 'ultralytics.nn.modules.activation'
+177473 INFO: Analyzing hidden import 'numpy._core._exceptions'
+177479 INFO: Analyzing hidden import 'numpy._core.cversions'
+177490 INFO: Analyzing hidden import 'numpy._core.tests._locales'
+177614 INFO: Analyzing hidden import 'numpy._core.tests._natype'
+177620 INFO: Analyzing hidden import 'numpy._core.tests.examples.cython.setup'
+177871 INFO: Analyzing hidden import 'numpy._core.tests.examples.limited_api.setup'
+177993 INFO: Analyzing hidden import 'numpy._core.tests.test__exceptions'
+177999 INFO: Analyzing hidden import 'numpy._core.tests.test_abc'
+178005 INFO: Analyzing hidden import 'numpy._core.tests.test_api'
+178036 INFO: Analyzing hidden import 'numpy._core.tests.test_argparse'
+178044 INFO: Analyzing hidden import 'numpy._core.tests.test_array_api_info'
+178049 INFO: Analyzing hidden import 'numpy._core.tests.test_array_coercion'
+178080 INFO: Analyzing hidden import 'numpy._core.tests.test_array_interface'
+178095 INFO: Analyzing hidden import 'numpy._core.tests.test_arraymethod'
+178100 INFO: Analyzing hidden import 'numpy._core.tests.test_arrayobject'
+178107 INFO: Analyzing hidden import 'numpy._core.tests.test_arrayprint'
+178147 INFO: Analyzing hidden import 'numpy._core.tests.test_casting_floatingpoint_errors'
+178156 INFO: Analyzing hidden import 'numpy._core.tests.test_casting_unittests'
+178186 INFO: Analyzing hidden import 'numpy._core.tests.test_conversion_utils'
+178195 INFO: Analyzing hidden import 'numpy._core.tests.test_cpu_dispatcher'
+178201 INFO: Analyzing hidden import 'numpy._core.tests.test_cpu_features'
+178214 INFO: Analyzing hidden import 'numpy._core.tests.test_custom_dtypes'
+178231 INFO: Analyzing hidden import 'numpy._core.tests.test_cython'
+178260 INFO: Analyzing hidden import 'numpy._core.tests.test_datetime'
+178440 INFO: Analyzing hidden import 'numpy._core.tests.test_defchararray'
+178477 INFO: Analyzing hidden import 'numpy._core.tests.test_deprecations'
+178828 INFO: Analyzing hidden import 'numpy._core.tests.test_dlpack'
+178838 INFO: Analyzing hidden import 'numpy._core.tests.test_dtype'
+178910 INFO: Analyzing hidden import 'numpy._core.tests.test_einsum'
+178965 INFO: Analyzing hidden import 'numpy._core.tests.test_errstate'
+178973 INFO: Analyzing hidden import 'numpy._core.tests.test_extint128'
+178984 INFO: Analyzing hidden import 'numpy._core.tests.test_finfo'
+178989 INFO: Analyzing hidden import 'numpy._core.tests.test_function_base'
+179021 INFO: Analyzing hidden import 'numpy._core.tests.test_getlimits'
+179033 INFO: Analyzing hidden import 'numpy._core.tests.test_half'
+179062 INFO: Analyzing hidden import 'numpy._core.tests.test_hashtable'
+179066 INFO: Analyzing hidden import 'numpy._core.tests.test_indexerrors'
+179075 INFO: Analyzing hidden import 'numpy._core.tests.test_indexing'
+179218 INFO: Analyzing hidden import 'numpy._core.tests.test_item_selection'
+179230 INFO: Analyzing hidden import 'numpy._core.tests.test_limited_api'
+179259 INFO: Analyzing hidden import 'numpy._core.tests.test_longdouble'
+179277 INFO: Analyzing hidden import 'numpy._core.tests.test_mem_overlap'
+179311 INFO: Analyzing hidden import 'numpy._core.tests.test_mem_policy'
+179329 INFO: Analyzing hidden import 'numpy._core.tests.test_memmap'
+179348 INFO: Analyzing hidden import 'numpy._core.tests.test_multiarray'
+179989 INFO: Analyzing hidden import 'numpy._core.tests.test_multiprocessing'
+179996 INFO: Analyzing hidden import 'numpy._core.tests.test_multithreading'
+180067 INFO: Analyzing hidden import 'numpy._core.tests.test_nditer'
+180201 INFO: Analyzing hidden import 'numpy._core.tests.test_nep50_promotions'
+180214 INFO: Analyzing hidden import 'numpy._core.tests.test_numeric'
+180458 INFO: Analyzing hidden import 'numpy._core.tests.test_numerictypes'
+180483 INFO: Analyzing hidden import 'numpy._core.tests.test_overrides'
+180513 INFO: Analyzing hidden import 'numpy._core.tests.test_print'
+180523 INFO: Analyzing hidden import 'numpy._core.tests.test_protocols'
+180527 INFO: Analyzing hidden import 'numpy._core.tests.test_records'
+180554 INFO: Analyzing hidden import 'numpy._core.tests.test_regression'
+180734 INFO: Analyzing hidden import 'numpy._core.tests.test_scalar_ctors'
+180746 INFO: Analyzing hidden import 'numpy._core.tests.test_scalar_methods'
+180761 INFO: Analyzing hidden import 'numpy._core.tests.test_scalarbuffer'
+180771 INFO: Analyzing hidden import 'numpy._core.tests.test_scalarinherit'
+180778 INFO: Analyzing hidden import 'numpy._core.tests.test_scalarmath'
+180824 INFO: Analyzing hidden import 'numpy._core.tests.test_scalarprint'
+180841 INFO: Analyzing hidden import 'numpy._core.tests.test_shape_base'
+180880 INFO: Analyzing hidden import 'numpy._core.tests.test_simd'
+180927 INFO: Analyzing hidden import 'numpy._core.tests.test_simd_module'
+180934 INFO: Analyzing hidden import 'numpy._core.tests.test_strings'
+180985 INFO: Analyzing hidden import 'numpy._core.tests.test_ufunc'
+181197 INFO: Analyzing hidden import 'numpy._core.tests.test_umath'
+181481 INFO: Analyzing hidden import 'numpy._core.tests.test_umath_accuracy'
+181494 INFO: Analyzing hidden import 'numpy._core.tests.test_umath_complex'
+181522 INFO: Analyzing hidden import 'numpy._core.tests.test_unicode'
+181536 INFO: Processing module hooks...
+181537 WARNING: Hidden import "charset_normalizer.md__mypyc" not found!
+182289 WARNING: Hidden import "pycparser.lextab" not found!
+182290 WARNING: Hidden import "pycparser.yacctab" not found!
+183803 INFO: Loading module hook 'hook-matplotlib.backends.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+183806 INFO: Matplotlib backend selection method: automatic discovery of used backends
+183890 INFO: Discovered Matplotlib backend(s) via `matplotlib.use()` call in module 'sympy.testing.runtests': ['Agg', 'Agg']
+183963 INFO: The following Matplotlib backends were discovered by scanning for `matplotlib.use()` calls: ['Agg', 'Agg']. If your backend of choice is not in this list, either add a `matplotlib.use()` call to your code, or configure the backend collection via hook options (see: https://pyinstaller.org/en/stable/hooks-config.html#matplotlib-hooks).
+183963 INFO: Selected matplotlib backends: ['Agg', 'Agg']
+184162 INFO: Loading module hook 'hook-pkg_resources.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+184311 INFO: Loading module hook 'hook-platformdirs.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+184727 INFO: Loading module hook 'hook-PIL.SpiderImagePlugin.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+184795 WARNING: Hidden import "pkg_resources._vendor.jaraco.functools" not found!
+184796 WARNING: Hidden import "pkg_resources._vendor.jaraco.context" not found!
+184797 WARNING: Hidden import "pkg_resources._vendor.jaraco.text" not found!
+187715 INFO: Loading module hook 'hook-setuptools.msvc.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks'...
+190204 INFO: Loading module hook 'hook-tzdata.py' from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\hooks\\stdhooks'...
+195782 INFO: Looking for ctypes DLLs
+195872 WARNING: Excluding Wine built-in DLL: C:\windows\system32\vcruntime140_1.dll
+195877 WARNING: Excluding Wine built-in DLL: C:\windows\system32\vcruntime140.dll
+195880 WARNING: Excluding Wine built-in DLL: C:\windows\system32\msvcp140.dll
+196010 WARNING: Ignoring /usr/lib64/libgomp.so.1 imported from Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\torch\_inductor\codecache.py - only basenames are supported with ctypes imports!
+196033 WARNING: Library nvcuda.dll required via ctypes not found
+196957 WARNING: Library UIAutomationClient_VC140_X86.dll required via ctypes not found
+196965 WARNING: Library UIAutomationClient_VC140_X64.dll required via ctypes not found
+198575 INFO: Analyzing run-time hooks ...
+198596 INFO: Including run-time hook 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py'
+198600 INFO: Including run-time hook 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py'
+198611 INFO: Including run-time hook 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py'
+198617 INFO: Including run-time hook 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py'
+198620 INFO: Including run-time hook 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgres.py'
+198627 INFO: Including run-time hook 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_mplconfig.py'
+198630 INFO: Processing pre-find module path hook _pyi_rth_utils from 'Z:\\opt\\wineprefix\\drive_c\\Python\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path\\hook-_pyi_rth_utils.py'.
+199286 INFO: Looking for dynamic libraries
+199502 WARNING: Could not find an up-to-date installation of `packaging`. License expressions might not be validated. To enforce validation, please install `packaging>=24.2`.
+220684 WARNING: Cannot get binary dependencies for file: Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\cv2\config-3.py
+220685 WARNING:   Reason: 'DOS Header magic not found.'
+220687 WARNING: Cannot get binary dependencies for file: Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\cv2\config.py
+220687 WARNING:   Reason: 'DOS Header magic not found.'
+220773 WARNING: Cannot get binary dependencies for file: Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\cv2\load_config_py3.py
+220773 WARNING:   Reason: 'DOS Header magic not found.'
+220931 WARNING: Cannot get binary dependencies for file: Z:\src\version
+220931 WARNING:   Reason: 'Unable to read the DOS Header, possibly a truncated file.'
+221087 WARNING: lib not found: msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll dependency of Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\numpy\_core\_multiarray_umath.cp311-win_amd64.pyd
+221092 WARNING: lib not found: libscipy_openblas64_-63c857e738469261263c764a36be9436.dll dependency of Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\numpy\_core\_multiarray_umath.cp311-win_amd64.pyd
+221160 WARNING: lib not found: libscipy_openblas64_-63c857e738469261263c764a36be9436.dll dependency of Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\numpy\linalg\_umath_linalg.cp311-win_amd64.pyd
+221583 WARNING: Excluding Wine built-in DLL: C:\windows\system32\MSVCP140.dll
+221604 WARNING: lib not found: msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll dependency of Z:\opt\wineprefix\drive_c\Python\Lib\site-packages\numpy\fft\_pocketfft_umath.cp311-win_amd64.pyd
+222083 WARNING: Excluding Wine built-in DLL: C:\windows\system32\MSVCP140_ATOMIC_WAIT.dll
+X connection to :99 broken (explicit kill or server shutdown).
+X connection to :99 broken (explicit kill or server shutdown).

@@ -24,6 +24,7 @@ REPO = 'J0SEPH-K/gato-setup'
 API = f'https://api.github.com/repos/{REPO}/releases/latest'
 ASSET_NAME = 'GatoSetup.exe'
 CHECK_FIRST_SEC = 90.0
+CHECK_FAST_SEC = 45.0   # cadence while the server floor blocks this build
 CHECK_EVERY_SEC = 6 * 3600.0
 UA = {'user-agent': 'gato-updater/1', 'accept': 'application/vnd.github+json'}
 MAX_BYTES = 900 * 1024 * 1024
@@ -143,7 +144,9 @@ def install(api):
                     os._exit(0)
             except Exception as e:
                 log(f'실패 {type(e).__name__}: {e}')
-            time.sleep(CHECK_EVERY_SEC)
+            # A raised server floor is the one case where the next check cannot wait hours:
+            # the bot refuses to start until the build is replaced, so poll fast and land it.
+            time.sleep(CHECK_FAST_SEC if api.auth.must_update() else CHECK_EVERY_SEC)
 
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
