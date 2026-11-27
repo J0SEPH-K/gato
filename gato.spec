@@ -15,7 +15,7 @@ import sys
 # walks it (RecursionError, "about 115 nested imports"). Raise the ceiling as the message says.
 sys.setrecursionlimit(sys.getrecursionlimit() * 5)
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import PyInstaller.building.build_main as _bm
 
 # PyInstaller talks to an isolated child interpreter over anonymous pipes for several helpers
@@ -88,6 +88,10 @@ hidden = (
     # the private exception module on some numpy builds, so the frozen exe dies
     # with "No module named 'numpy._core._exceptions'". Collect them explicitly.
     + _precomputed('numpy._core')
+    # torch._dynamo imports its polyfill modules by string path, so the static graph misses
+    # them: torchvision -> torch._dynamo.polyfills.copy dies with ModuleNotFoundError in the
+    # frozen tree even though the same import works from source. Walk the whole subtree.
+    + collect_submodules('torch._dynamo')
 )
 
 # cv2 is imported by a dozen modules but its contrib hook collects nothing under Wine:
