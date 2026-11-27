@@ -26,11 +26,26 @@ import PyInstaller.building.build_main as _bm
 # optional: hook-cv2 is what sets cv2's module_collection_mode to 'py', without which the frozen
 # cv2 package re-imports itself out of the PYZ archive and dies with "recursion is detected".
 _bm.discover_hook_directories = lambda: []
-_CONTRIB_HOOKS = os.path.join(sys.prefix, 'Lib', 'site-packages',
-                              '_pyinstaller_hooks_contrib', 'hooks', 'stdhooks')
-_HOOKPATH = [os.path.join(os.path.abspath(SPECPATH), 'buildhooks')]
-if os.path.isdir(_CONTRIB_HOOKS):
-    _HOOKPATH.append(_CONTRIB_HOOKS)
+
+# Where pyinstaller-hooks-contrib actually put its hooks. The wheel moved them from
+# `<pkg>/hooks/stdhooks` to `<pkg>/stdhooks` (and older releases used yet another layout), so a
+# hardcoded path silently stopped existing and every contrib hook stopped running. That is not
+# cosmetic: hook-clr_loader is what ships clr_loader's native ClrLoader.dll, and without it the
+# frozen exe dies at webview.start() with `ClrLoader.dll: error 0x7e` while --selftest still
+# passes (it never imports webview.platforms.winforms). Probe both layouts and FAIL the build
+# if neither exists, so this can never regress silently again.
+def _contrib_hooks():
+    base = os.path.join(sys.prefix, 'Lib', 'site-packages', '_pyinstaller_hooks_contrib')
+    for cand in (os.path.join(base, 'stdhooks'), os.path.join(base, 'hooks', 'stdhooks')):
+        if os.path.isdir(cand):
+            return cand
+    return None
+
+_CONTRIB_HOOKS = _contrib_hooks()
+if not _CONTRIB_HOOKS:
+    raise SystemExit('pyinstaller-hooks-contrib not found (looked for stdhooks and hooks/stdhooks); '
+                     'install it before building')
+_HOOKPATH = [os.path.join(os.path.abspath(SPECPATH), 'buildhooks'), _CONTRIB_HOOKS]
 
 # The isolated child interpreter itself dies under Wine (the ucrtbase crealf abort), so anything
 # routed through it raises EOFError from readline(). Run those helpers inline instead: they are
@@ -112,6 +127,33 @@ if os.path.isdir(_CV2DIR):
             binaries.append((_p, 'cv2'))
 
 _SP = os.path.join(sys.prefix, 'Lib', 'site-packages')
+
+# clr_loader + pythonnet, named explicitly instead of relying on hook-clr_loader/hook-clr.
+# The hooks are correct but they are the only thing that copies these, so any change in the
+# contrib wheel (layout, hook rename, the hooks dir not being found at all) silently produces an
+# exe that cannot start the WinForms backend. Dest mirrors the in-package layout because
+# clr_loader resolves its FFI DLLs relative to its own module directory, which in the frozen tree
+# is sys._MEIPASS. Both arches are shipped; clr_loader picks one at runtime.
+for _sub in ('clr_loader', 'pythonnet'):
+    _root = os.path.join(_SP, _sub)
+    for _r, _dirs, _files in os.walk(_root):
+        _rel = os.path.relpath(_r, _root)
+        _dest = _sub if _rel == '.' else os.path.join(_sub, _rel)
+        for _f in _files:
+            if _f.lower().endswith('.dll'):
+                binaries.append((os.path.join(_r, _f), _dest))
+
+# Same reasoning for pywebview's .NET interop assemblies and the WebView2 loader. hook-webview
+# collects webview/lib, and `import webview` alone needs none of it, so a missing hook directory
+# yields an exe that imports fine and then dies inside webview.start().
+_WVLIB = os.path.join(_SP, 'webview', 'lib')
+if os.path.isdir(_WVLIB):
+    for _r, _dirs, _files in os.walk(_WVLIB):
+        _rel = os.path.relpath(_r, _WVLIB)
+        _dest = 'webview/lib' if _rel == '.' else os.path.join('webview/lib', _rel)
+        for _f in _files:
+            if _f.lower().endswith('.dll'):
+                binaries.append((os.path.join(_r, _f), _dest))
 
 # torch keeps its native runtime (torch_cpu.dll, c10.dll, torch_python.dll, the mkl/omp builds) in
 # torch/lib, which is NOT on the DLL search path of the analysis. Once torch ships as source

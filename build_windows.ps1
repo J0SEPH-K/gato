@@ -7,7 +7,11 @@ $py = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw 'Run install.ps1 first (creates .venv).' }
 $ProgressPreference = 'SilentlyContinue'
 
-& $py -m pip install --upgrade pyinstaller
+# Pinned: the spec depends on pyinstaller-hooks-contrib's internal layout (it is where hook-clr_loader,
+# hook-clr and hook-webview live), and an unpinned upgrade moves that directory without warning.
+# 2026.x moved it from `_pyinstaller_hooks_contrib/hooks/stdhooks` to `_pyinstaller_hooks_contrib/stdhooks`,
+# which silently disabled every contrib hook and shipped an installer with no ClrLoader.dll.
+& $py -m pip install 'pyinstaller==6.22.3' 'pyinstaller-hooks-contrib==2026.10'
 if ($LASTEXITCODE -ne 0) { throw 'pip install pyinstaller failed' }
 
 Write-Host '== PyInstaller =='
