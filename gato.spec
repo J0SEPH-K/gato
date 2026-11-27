@@ -157,6 +157,12 @@ a = Analysis(
     # matplotlib on plain `import ultralytics`, so the frozen exe died with "No module named
     # 'matplotlib'" at the YOLO step. Included again; only dev-only packages stay excluded.
     excludes=['tkinter', 'pytest', 'IPython', 'notebook'],
+    # torch calls inspect.getsource() at import time (torch._dynamo and _inductor build their own
+    # source maps, and torch.jit resolves wrapped functions that way). With everything packed into
+    # the PYZ there is no source to read, so `import torch` in the frozen exe dies with
+    # "OSError: could not get source code". Ship these trees as .py next to the bytecode
+    # ('pyz+py') so getfile()/getsource() resolve to real files on disk.
+    module_collection_mode={'torch': 'pyz+py', 'torchvision': 'pyz+py', 'ultralytics': 'pyz+py'},
     noarchive=False,
 )
 # The repo-root file VERSION is a 7-byte text file. python311.dll imports VERSION.dll, and the
