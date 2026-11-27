@@ -113,6 +113,16 @@ if os.path.isdir(_CV2DIR):
 
 _SP = os.path.join(sys.prefix, 'Lib', 'site-packages')
 
+# torch keeps its native runtime (torch_cpu.dll, c10.dll, torch_python.dll, the mkl/omp builds) in
+# torch/lib, which is NOT on the DLL search path of the analysis. Once torch ships as source
+# ('pyz+py', needed for inspect.getsource) PyInstaller starts trying to resolve _C.pyd's imports and
+# only emits "Library not found: could not resolve 'torch_cpu.dll'" warnings -- the frozen exe then
+# dies with "DLL load failed while importing _C". Collect that directory verbatim.
+_TORCHLIB = os.path.join(_SP, 'torch', 'lib')
+if os.path.isdir(_TORCHLIB):
+    binaries += [(os.path.join(_TORCHLIB, _f), 'torch/lib')
+                 for _f in os.listdir(_TORCHLIB) if _f.lower().endswith('.dll')]
+
 # torchvision registers its custom operators (torchvision::nms, ::roi_align, ...) in the C++
 # extension _C.pyd at import. If that extension is not in the frozen tree the registry stays empty
 # and every torchvision import dies with "operator torchvision::nms does not exist", which also
