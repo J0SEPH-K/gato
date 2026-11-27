@@ -1205,8 +1205,17 @@ class Brain:
         self._stray_tries = getattr(self, '_stray_tries', 0) + 1
         if self._stray_tries > 6:
             if self._stray_tries == 7:
-                self._log('[창] 닫히지 않는 창 — 수동 확인 필요')
-            return True
+                self._log('[창] 닫히지 않는 창 — 대기하며 5초마다 재시도')
+            # Do NOT latch forever: the loading splash reads 'unknown' too, so a permanent
+            # latch bricked the run for good the moment the game was still starting (the
+            # whole loop did nothing but `continue` for 20+ minutes). Fall through instead
+            # so the rest of the loop keeps running, and re-arm the Esc attempt every 5 s.
+            if now - getattr(self, '_stray_latch_at', 0.0) < 5.0:
+                return False
+            self._stray_latch_at = now
+            self._stray_tries = 0
+            self.hands.press('esc', hold=0.08, wait=True)
+            return False
         if self._stray_tries % 3 == 0 and vis.inventory_open(img):
             self._log('[창] 창닫기 클릭')
             self.hands.click(730, 543, 'left', wait=True)
