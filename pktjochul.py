@@ -120,22 +120,72 @@ class PktJochul:
         return out, cover
 
     @staticmethod
-    def _pair(frame):
-        """The swap pair in one frame, or None.
-
-        The exact body layout is not documented, so readings are tried in order
-        and the first that yields exactly two distinct slot ids wins. The
-        leading byte is skipped first because it is usually a frame subtype
-        (0x01) and would otherwise read as slot 1.
-        """
-        tail = frame[4:]
-        if len(tail) < 2:
+    def _pair_at(frame, a, b):
+        """Bytes at two fixed frame offsets read as a slot pair, or None."""
+        if len(frame) <= b:
             return None
-        for cand in (tail[1:], tail):
-            slots = [b for b in cand if 1 <= b <= 5]
-            if len(slots) == 2 and slots[0] != slots[1]:
-                return (slots[0], slots[1])
+        x, y = frame[a], frame[b]
+        if 1 <= x <= 5 and 1 <= y <= 5 and x != y:
+            return (x, y)
         return None
+
+    @staticmethod
+    def _pair(frame):
+        """The swap pair using the default layout, or None.
+
+        The body layout is not documented. Live capture of the real server stream
+        (1.0.46) shows the pair at frame offsets 8 and 11, i.e. body offsets 4 and 7:
+        `len|sub|op|00 00|count|slotA .. slotB .. 00`. `_layout` re-derives the
+        offsets from each round anyway; this is only the fallback.
+        """
+        return PktJochul._pair_at(frame, *PktJochul.DEFAULT_OFF)
+
+    DEFAULT_OFF = (8, 11)
+    MAX_OFF = 24
+    MIN_LAYOUT_FRAMES = 3
+    MIN_LAYOUT_RATE = 0.60
+
+    @staticmethod
+    def _layout(frames):
+        """Best (opcode, offset_a, offset_b) for this round, or (None, why).
+
+        Fixed offsets break the moment the server reorders a body, and the old
+        "first two in-range bytes" reading happily matched a frame counter and
+        answered the identity permutation. So scan every offset pair and keep the
+        one that behaves like a swap column: present in most of that opcode's
+        frames AND varied (a real column moves different characters round after
+        round, a counter repeats). Two columns that score the same abstain.
+        """
+        per = {}
+        for op, frame in frames:
+            per.setdefault(op, []).append(frame)
+        cand = []
+        for op, group in per.items():
+            if len(group) < PktJochul.MIN_LAYOUT_FRAMES:
+                continue
+            limit = min(PktJochul.MAX_OFF, min(len(f) for f in group))
+            for a in range(4, limit):
+                for b in range(a + 1, limit):
+                    pairs = [p for p in (PktJochul._pair_at(f, a, b) for f in group) if p]
+                    if len(pairs) < PktJochul.MIN_LAYOUT_FRAMES:
+                        continue
+                    if len(pairs) < PktJochul.MIN_LAYOUT_RATE * len(group):
+                        continue
+                    variety = len(set(pairs))
+                    if variety < 3:
+                        continue
+                    cand.append(((variety, len(pairs), a, b), op, a, b, pairs, len(group)))
+        if not cand:
+            return None, 'no frame column carries a varying slot pair'
+        # Deepest column wins a tie: the pair sits behind the count field, so a constant
+        # byte early in the body (subtype/count) would otherwise shadow the real column.
+        cand.sort(reverse=True)
+        _key, op, a, b, pairs, total = cand[0]
+        info = f'op={op:#06x} off={a},{b} {len(pairs)}/{total}'
+        if len(cand) > 1 and cand[1][0][:2] == cand[0][0][:2] and cand[1][1] != op:
+            other = cand[1]
+            return None, info + f' — ambiguous with op={other[1]:#06x} off={other[2]},{other[3]}'
+        return (op, a, b), info
 
     @staticmethod
     def _best_tiling(segs, want='down'):
@@ -160,31 +210,10 @@ class PktJochul:
         plausible opcodes means the layout is ambiguous and mixing them would
         corrupt the permutation.
         """
-        per = {}
-        for op, frame in frames:
-            hit, total, pairs = per.get(op, (0, 0, []))
-            pair = PktJochul._pair(frame)
-            per[op] = (hit + (1 if pair else 0), total + 1, pairs + ([pair] if pair else []))
-        cand = {op: v for op, v in per.items()
-                if v[1] >= MIN_SWAPS and v[0] / v[1] >= MIN_PAIR_RATE}
-        if not cand:
-            top = sorted(per.items(), key=lambda kv: -kv[1][1])[:4]
-            return None, 'no opcode carries pairs (' + ', '.join(
-                f'{op:#06x}:{h}/{t}' for op, (h, t, _p) in top) + ')'
-        if len(cand) > 1:
-            # A real swap opcode moves DIFFERENT characters round after round, so its
-            # decoded pairs are varied. A noise opcode that happens to carry in-range
-            # bytes repeats the same pair every time. Rank on that, and abstain when
-            # the top two are equally varied (mixing them would corrupt the order).
-            ranked = sorted(cand.items(), key=lambda kv: -len(set(kv[1][2])))
-            first_n = len(set(ranked[0][1][2]))
-            if first_n > len(set(ranked[1][1][2])):
-                op = ranked[0][0]
-                return op, f'op={op:#06x} {cand[op][0]}/{cand[op][1]} distinct={first_n}'
-            return None, 'ambiguous opcodes ' + ', '.join(
-                f'{op:#06x}:{h}/{t}' for op, (h, t, _p) in sorted(cand.items()))
-        op = next(iter(cand))
-        return op, f'op={op:#06x} {cand[op][0]}/{cand[op][1]}'
+        layout, info = PktJochul._layout(frames)
+        if layout is None:
+            return None, info
+        return layout[0], info
 
     @staticmethod
     def _replay(pairs):
@@ -223,10 +252,11 @@ class PktJochul:
             return None, 'no framing candidate'
         if cover < 0.30:
             return None, f'framing never tiled ({cover * 100:.0f}% {endian})'
-        op, op_info = self.swap_opcode(frames)
-        if op is None:
+        layout, op_info = self._layout(frames)
+        if layout is None:
             return None, f'{len(frames)}f {cover * 100:.0f}% {endian} — {op_info}'
-        pairs = [p for o, frame in frames if o == op for p in [self._pair(frame)] if p]
+        op, a, b = layout
+        pairs = [p for o, frame in frames if o == op for p in [self._pair_at(frame, a, b)] if p]
         info = (f'{len(frames)}f {cover * 100:.0f}% {endian} ops='
                 f'{len(Counter(o for o, _f in frames))} {op_info} swaps={len(pairs)}')
         if len(pairs) < MIN_SWAPS:
