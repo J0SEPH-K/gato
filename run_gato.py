@@ -6,6 +6,13 @@ actual bot logic lives in prism.
 import os
 import sys
 
+# pythonnet 3.x defaults to coreclr (.NET Core), which a stock Windows box does not
+# have -- only the .NET Framework is installed. Without this the winforms host dies
+# inside webview.start() with "Failed to create a .NET runtime (coreclr)" and the app
+# shows a window that never paints while every background thread keeps logging.
+# Must be set before pythonnet loads the runtime, so before `import prism` below.
+os.environ.setdefault('PYTHONNET_RUNTIME', 'netfx')
+
 GAME_EXE = "gersang.exe"
 MIN_PY = (3, 11)
 
