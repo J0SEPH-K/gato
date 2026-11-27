@@ -156,7 +156,10 @@ def _selftest() -> int:
     # Log next to the exe so the build step can always read it; fall back to the user dir if the
     # program directory happens to be read-only. Written incrementally so a hard crash still leaves
     # evidence of how far the run got.
-    log_path = os.path.join(here, "selftest.txt")
+    # A frozen one-folder build has no __file__ next to it in the app dir unless PyInstaller put
+    # it there, so prefer the dir of the actual executable. Fall back to the user dir.
+    base = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else here
+    log_path = os.path.join(base, "selftest.txt")
     try:
         open(log_path, "a", encoding="utf-8").close()
     except OSError:

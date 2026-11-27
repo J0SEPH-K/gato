@@ -16,8 +16,13 @@ if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed' }
 if (-not (Test-Path 'dist\Gato\Gato.exe')) { throw 'dist\Gato\Gato.exe missing' }
 
 Write-Host '== self-test of the packaged app =='
-$st = Start-Process -FilePath 'dist\Gato\Gato.exe' -ArgumentList '--selftest' -Wait -PassThru
-Get-Content "$env:LOCALAPPDATA\GATO\selftest.txt" -ErrorAction SilentlyContinue
+$so = Join-Path $PWD 'selftest.stdout.txt'
+$se = Join-Path $PWD 'selftest.stderr.txt'
+$st = Start-Process -FilePath 'dist\Gato\Gato.exe' -ArgumentList '--selftest' -Wait -PassThru `
+      -RedirectStandardOutput $so -RedirectStandardError $se
+foreach ($p in @('dist\Gato\selftest.txt', "$env:LOCALAPPDATA\GATO\selftest.txt", $so, $se)) {
+    if (Test-Path $p) { Write-Host "--- $p"; Get-Content $p -ErrorAction SilentlyContinue }
+}
 if ($st.ExitCode -ne 0) { throw 'packaged self-test failed (see selftest.txt above)' }
 
 if (-not (Test-Path 'installer\vc_redist.x64.exe')) {
