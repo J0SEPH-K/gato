@@ -109,6 +109,7 @@ class Hands:
         self._q = queue.Queue()
         self._mouse_held = None
         self._fg_at = 0.0
+        self._fg_fail = 0          # consecutive failed foreground steals (log throttle)
         self._pin = None             # (screen_x, screen_y, expires_monotonic): where the cursor must stay
         self.guard_enabled = False   # set by Brain while the macro runs
         self.guard_fixes = 0         # times the guard pulled a drifting cursor back
@@ -173,40 +174,155 @@ class Hands:
             return hwnd
         else:
             return find_window()
+    @staticmethod
+    def _root(hwnd: int) -> int:
+        try:
+            r = win32gui.GetAncestor(hwnd, 2)   # GA_ROOT
+            if r:
+                return r
+        except Exception:
+            pass
+        try:
+            r = win32gui.GetWindow(hwnd, 3)   # GW_OWNER
+        except Exception:
+            r = 0
+        return r or hwnd
+    @staticmethod
+    def _hit(sx: int, sy: int) -> int:
+        """Topmost window under a screen point; pywin32 signatures differ by version."""
+        try:
+            return win32gui.WindowFromPoint(sx, sy) or 0
+        except TypeError:
+            pass
+        try:
+            return user32.WindowFromPoint(ctypes.byref(ctypes.wintypes.POINT(sx, sy))) or 0
+        except Exception:
+            return 0
+    @staticmethod
+    def _on_top(hwnd: int) -> bool:
+        """True when the window really is what a click would hit.
+
+        GetForegroundWindow() is not the right test: a fullscreen borderless game that
+        owns the whole desktop can sit visually in front while another window of the same
+        process still holds the foreground flag, and vice versa. What actually decides
+        whether an absolute-coordinate click lands is the topmost window under that point,
+        so probe several points of the client area and require all of them to resolve to
+        this window (or one of its children).
+        """
+        try:
+            l, t, r, b = win32gui.GetClientRect(hwnd)
+            if r - l < 8 or b - t < 8:
+                return False
+            for fx, fy in ((0.5, 0.5), (0.25, 0.3), (0.75, 0.7)):
+                sx, sy = win32gui.ClientToScreen(hwnd, (int(l + (r - l) * fx), int(t + (b - t) * fy)))
+                hit = Hands._hit(sx, sy)
+                if not hit or Hands._root(hit) != hwnd:
+                    return False
+            return True
+        except Exception:
+            return False
+    def _try_foreground(self, hwnd) -> bool:
+        """Best-effort foreground steal; True when clicks will actually reach the game.
+
+        SetForegroundWindow alone is refused whenever this process did not receive the last
+        input event (the panel window had focus, so it did not), and the old code then
+        aborted the input entirely -- 148 consecutive 'front switch failed' with zero clicks
+        while the game sat right there. Every legal trick is tried in order with the
+        foreground and target threads attached, plus the undocumented SwitchToThisWindow
+        and a topmost toggle, which is the only pair that still works once the shell has
+        locked the foreground queue.
+        """
+        hwnd = Hands._root(hwnd)
+        if Hands._on_top(hwnd):
+            return True
+        cur_tid = win32api.GetCurrentThreadId()
+        fg = win32gui.GetForegroundWindow()
+        fg_tid = win32process.GetWindowThreadProcessId(fg)[0] if fg else 0
+        try:
+            tgt_tid = win32process.GetWindowThreadProcessId(hwnd)[0]
+        except Exception:
+            tgt_tid = 0
+        attached = []
+        for tid in (fg_tid, tgt_tid):
+            if tid and tid != cur_tid and tid not in attached:
+                try:
+                    if user32.AttachThreadInput(cur_tid, tid, True):
+                        attached.append(tid)
+                except Exception:
+                    pass
+        try:
+            try:
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            except Exception:
+                pass
+            ladder = [
+                lambda: win32gui.BringWindowToTop(hwnd),
+                lambda: win32gui.SetWindowPos(
+                    hwnd, win32con.HWND_TOP, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW),
+                lambda: win32gui.SetForegroundWindow(hwnd),
+                lambda: user32.SwitchToThisWindow(hwnd, True),
+            ]
+            for call in ladder:
+                try:
+                    call()
+                except Exception:
+                    pass
+                if Hands._on_top(hwnd):
+                    return True
+            # A thread that just received an input event may set the foreground window;
+            # the ALT tap is what makes the following call legal.
+            try:
+                self._press_key('alt', 0.02)
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            if Hands._on_top(hwnd):
+                return True
+            # Last resort: topmost toggle. It re-inserts the window at the head of the
+            # z-order unconditionally, which is all a click needs.
+            try:
+                win32gui.SetWindowPos(
+                    hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW)
+                win32gui.SetWindowPos(
+                    hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW)
+            except Exception:
+                pass
+        finally:
+            for tid in attached:
+                try:
+                    user32.AttachThreadInput(cur_tid, tid, False)
+                except Exception:
+                    pass
+        return Hands._on_top(hwnd)
     def _foreground(self) -> int:
         hwnd = self._hwnd()
         if not hwnd:
-            self._log('입력 스킵 — 거상 창 없음')
+            self._log('입력 스킵 - 거상 창 없음')
             return 0
-        else:
-            if win32gui.GetForegroundWindow() != hwnd:
-                cur_tid = win32api.GetCurrentThreadId()
-                fg = win32gui.GetForegroundWindow()
-                fg_tid = win32process.GetWindowThreadProcessId(fg)[0] if fg else 0
-                attached = False
-                if fg_tid and fg_tid != cur_tid:
-                        attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
-                try:
-                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-                    try:
-                        win32gui.SetForegroundWindow(hwnd)
-                    except Exception:
-                        pass
-                finally:
-                    if attached:
-                        user32.AttachThreadInput(cur_tid, fg_tid, False)
-                self._fg_at = time.monotonic()
-                time.sleep(0.15)
-                if win32gui.GetForegroundWindow() != hwnd:
-                    self._log('입력 스킵 — 거상 창 전면 전환 실패')
-                    return 0
-                else:
-                    self._log('전면 전환')
-            if self._fg_at:
-                remain = self.FG_SETTLE - (time.monotonic() - self._fg_at)
-                if remain > 0:
-                    time.sleep(remain)
-            return hwnd
+        # Gate on what a click would actually hit, not on the foreground flag: the panel
+        # can hold the flag while the game is still the topmost window, and then every
+        # click was preceded by a pointless (and slow) steal attempt.
+        if not Hands._on_top(Hands._root(hwnd)):
+            ok = self._try_foreground(hwnd)
+            self._fg_at = time.monotonic()
+            if ok:
+                self._fg_fail = 0
+                self._log('전면 전환')
+            else:
+                # Clicks use absolute screen coordinates and land on whatever is under the
+                # cursor, so a failed steal is not fatal - keep clicking instead of skipping.
+                self._fg_fail += 1
+                if self._fg_fail <= 3 or self._fg_fail % 100 == 0:
+                    self._log(f'전면 전환 실패 {self._fg_fail}회 - 좌표 클릭으로 계속')
+            time.sleep(0.15)
+        if self._fg_at:
+            remain = self.FG_SETTLE - (time.monotonic() - self._fg_at)
+            if remain > 0:
+                time.sleep(remain)
+        return hwnd
     def focus_game(self) -> bool:
         try:
             return bool(self._foreground())
