@@ -247,6 +247,7 @@ class Brain:
         self._battle_thread = None
         self._shutdown_at = None
         self._no_battle_count = 0
+        self._burn_skips = 0   # clicks dropped because the target was a burning (already-claimed) mob
         self._sub_hands = {}
         self._sub_list = []
         self._sub_list_at = 0.0
@@ -1808,6 +1809,11 @@ class Brain:
                             self._log(f'{p}조철 진단 preclick answer={answer} x={x} popuppx={_ps1}/{_ps2} scores={_pscores}')
                     except Exception as _e:
                         self._log(f'{p}조철 진단 pre 실패 {_e!r}')
+                    # ONE click, no second chance. The old code always double-clicked (a leftover
+                    # of the vision era) and then re-clicked whenever the reveal disagreed - a
+                    # second guess dressed as a first answer. When the answer came from the
+                    # packets it is final: a second click is sent only if the first one did not
+                    # even dispatch (_land failed), which is an input fault, not a doubt.
                     _ok1 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
                     self._log(f'{p}조철 진단 click1={_ok1}')
                     try:
@@ -1823,11 +1829,20 @@ class Brain:
                             self._log(f'{p}조철 진단 post1 popuppx={vis._px_sum(_p1, 513, 43, 514, 44)}/{vis._px_sum(_p1, 514, 43, 515, 44)}')
                     except Exception:
                         pass
-                    time.sleep(0.3)
-                    _ok2 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
-                    self._log(f'{p}조철 진단 click2={_ok2}')
                     meta['fg_after'] = _fg_info()
-                    self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x})')
+                    if pkt_answer is not None:
+                        if not _ok1:
+                            time.sleep(0.2)
+                            _ok1 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                            self._log(f'{p}조철 클릭 재전송 (미착탄) ={_ok1}')
+                        self._log(f'{p}조철 정답 클릭 ({answer}번 x={x}) — 단일 클릭')
+                    else:
+                        # vision-only answer: keep the historical double click, it is the only
+                        # thing that ever made a marker/settle pick stick on a live round
+                        time.sleep(0.3)
+                        _ok2 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
+                        self._log(f'{p}조철 진단 click2={_ok2}')
+                        self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x}) — 시각 판독')
                     time.sleep(0.9)
                     try:
                         # after the click the clicked character turns green and the 마패 shows over it for ~1.7 s,
@@ -1856,7 +1871,13 @@ class Brain:
                     # had reveal != answer and every one of them failed).
                     _rev = meta.get('reveal_slot')
                     _rev_conf = float(meta.get('reveal_conf') or 0.0)
-                    if _rev and _rev != answer and _rev_conf >= jochul.MARKER_ABS:
+                    if pkt_answer is not None and _rev and _rev != answer:
+                        # Packet answer is authoritative: the reveal is recorded as evidence only,
+                        # never as a correction. That is the whole point of decoding the traffic --
+                        # a reveal-driven reclick means the first click was a guess.
+                        self._log(f'{p}조철 reveal={_rev} (신뢰도 {_rev_conf:.3f}) — 패킷 {answer} 유지, 재클릭 없음')
+                        meta['reveal_agrees'] = (_rev == answer)
+                    elif _rev and _rev != answer and _rev_conf >= jochul.MARKER_ABS:
                         try:
                             if _popup_present():
                                 x2 = jochul.CLICK_X[_rev]
@@ -2290,27 +2311,46 @@ class Brain:
                                                                     coords = dummy_guard.filter(self.detector.detect(img, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts), time.time())
                                                                     pick = detector.nearest_in_gate(coords, mob_gate_sc, center=detector.CENTER)
                                                                     search_window.advance(units)
-                                                                    if pick:
-                                                                        # Re-detect on the NEWEST frame and click where the mob is NOW:
-                                                                        # mobs walk, and the frame the pick came from is already old.
-                                                                        fresh = self.engine.snapshot()
-                                                                        if fresh is None or not combat.is_main(fresh):
+                                                                    def _confirm_pick(cur):
+                                                                        # Re-detect on a NEWEST frame -> (frame, point) or (None, None).
+                                                                        # Mobs walk and the frame a pick came from is already old. This also
+                                                                        # re-applies the fire-ring filter on a LATER frame: the ring flickers,
+                                                                        # so a mob another player already claimed can slip through once and be
+                                                                        # skipped on the next sample. Clicking claimed mobs is what raises the
+                                                                        # 조철 counter.
+                                                                        fr = self.engine.snapshot()
+                                                                        if fr is None or not combat.is_main(fr):
                                                                             self._log('색적 결과 폐기 — 클릭 직전 화면 변경(연산 지연)')
-                                                                            pick = None
-                                                                        else:
-                                                                            c2 = dummy_guard.filter(detector.drop_ui_points(self.detector.detect(fresh, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts)), time.time())
-                                                                            near = None
-                                                                            if c2 is not None and c2.shape[0]:
-                                                                                dd = np.hypot(c2[:, 0] - pick[0], c2[:, 1] - pick[1])
-                                                                                j = int(np.argmin(dd))
-                                                                                if dd[j] <= 26.0:
-                                                                                    near = c2[j]
-                                                                            if near is None:
-                                                                                self._log('색적 결과 폐기 — 클릭 직전 재확인에서 대상 사라짐/이동')
+                                                                            return (None, None)
+                                                                        cc = dummy_guard.filter(detector.drop_ui_points(self.detector.detect(fr, fire_roi=self.fire_roi, trust_avoid=self.trust_avoid, fire_rect=self.fire_rect, **sprite_opts)), time.time())
+                                                                        if cc is None or not cc.shape[0]:
+                                                                            self._log('색적 결과 폐기 — 클릭 직전 재확인에서 대상 사라짐/이동')
+                                                                            return (None, None)
+                                                                        dd = np.hypot(cc[:, 0] - cur[0], cc[:, 1] - cur[1])
+                                                                        j = int(np.argmin(dd))
+                                                                        if dd[j] > 26.0:
+                                                                            self._log('색적 결과 폐기 — 클릭 직전 재확인에서 대상 사라짐/이동')
+                                                                            return (None, None)
+                                                                        nn = cc[j]
+                                                                        return (fr, (float(nn[0]), float(nn[1]), float(detector.corrected_dist(nn[None, :])[0])))
+
+                                                                    if pick:
+                                                                        fresh, pick = _confirm_pick(pick)
+                                                                        if fresh is not None:
+                                                                            img = fresh
+                                                                        if pick and self.fire_roi is not None and bool(config.load().get('jochul_avoid', True)):
+                                                                            # Second sample a beat later, purely to catch a ring that
+                                                                            # flickered off on the previous frame. A dropped pick costs one
+                                                                            # search loop; a click on someone else's mob costs 조철 progress.
+                                                                            time.sleep(0.08)
+                                                                            _f2, _p2 = _confirm_pick(pick)
+                                                                            if _p2 is None:
+                                                                                self._burn_skips += 1
                                                                                 pick = None
                                                                             else:
-                                                                                pick = (float(near[0]), float(near[1]), float(detector.corrected_dist(near[None, :])[0]))
-                                                                                img = fresh
+                                                                                fresh, pick = _f2, _p2
+                                                                                if fresh is not None:
+                                                                                    img = fresh
                                                                     if pick:
                                                                         x, y, dist = pick
                                                                         if self._prefight(img):

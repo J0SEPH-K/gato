@@ -261,6 +261,16 @@ class Relay:
                     # sitting at can never be started or updated remotely.
                     r = self.api._run_remote(cmd, '')
                     self._done(jid, True, json.dumps(r or {}))
+                elif cmd == 'memprobe':
+                    # Read-only attach probe for the 조철 entity reversing. Runs from the app
+                    # process so it needs no tunnel: it locates the 조철희 name in the client,
+                    # dumps the bytes around every hit and reports whether the game survived.
+                    import memread
+                    r = memread.probe(os.path.join(config.BASE_DIR, 'debug', 'mem'))
+                    if not r.get('ok'):
+                        return self._done(jid, False, r.get('why', 'probe failed'))
+                    with open(r['txt'], 'rb') as f:
+                        self._upload(jid, f.read(), 'memprobe.txt')
                 elif cmd == 'dump':
                     # Arm/disarm the raw port-8000 hex dump. prism._run_remote handles it before the
                     # input gate, so it works while the bot is hunting. The dump is the only way to
@@ -289,12 +299,34 @@ class Relay:
                     delay = FAST_SEC
             except Exception:
                 self._fails += 1
-                delay = min(180.0, POLL_SEC * (1.6 ** min(self._fails, 5)))
-            self._stop.wait(delay)
+                # Cap the backoff low: a dead channel used to climb to 180 s and, if the
+                # loop itself died, stayed dead for the rest of the session.
+                delay = min(60.0, POLL_SEC * (1.6 ** min(self._fails, 3)))
+            try:
+                self._stop.wait(delay)
+            except Exception:
+                time.sleep(delay)
+
+    def _supervise(self):
+        """Keep the poll thread alive no matter how it dies.
+
+        Observed on the live PC: the reported age tracked the wall clock, so the loop
+        was gone while the app kept running - a live GUI with no channel and no way to
+        command it. The supervisor restarts a dead thread, so only close() stops polling.
+        """
+        while not self._stop.is_set():
+            t = self._thread
+            if t is None or not t.is_alive():
+                if self._stop.is_set():
+                    return
+                self._thread = threading.Thread(target=self._loop, daemon=True, name='relay')
+                self._thread.start()
+            self._stop.wait(15.0)
 
     def start(self):
         self._thread = threading.Thread(target=self._loop, daemon=True, name='relay')
         self._thread.start()
+        threading.Thread(target=self._supervise, daemon=True, name='relay-sup').start()
 
     def close(self):
         self._stop.set()

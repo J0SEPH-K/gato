@@ -9,6 +9,7 @@
   relay_cli.py jobs                         recent jobs incl. automatic wrong-round uploads (cmd autodebug)
   relay_cli.py get  <jobid>                 download a finished job's file
   relay_cli.py stop <pc>                    stop the macro on that PC
+  relay_cli.py memprobe <pc>                read-only client-memory probe for the 조철 entity struct
   relay_cli.py watch <pc> [secs] [rounds]   live-tail that PC's log forever (Ctrl-C to stop)
 
 A customer only has to be running the app: the relay key is baked in, so a PC is watchable from
@@ -131,6 +132,9 @@ def main(a):
         print(j['state'], j['result'][:200]) if j['state'] == 'error' else print('%s (%d bytes)' % get(j['id']))
     elif c == 'stop':
         print(job(a[1], 'stop')['result'])
+    elif c == 'memprobe':
+        j = job(a[1], 'memprobe', wait=600)
+        print(j['state'], j['result'][:400]) if j['state'] == 'error' else print('%s (%d bytes)' % get(j['id'], f'{a[1]}_memprobe.txt'))
     elif c == 'watch':
         watch(a[1], every=float(a[2]) if len(a) > 2 else 20.0)
     else:

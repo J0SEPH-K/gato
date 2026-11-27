@@ -147,6 +147,11 @@ class Api:
         # Packet dump toggle. Handled before the input gate: it is not an input command, so it has
         # to arm while the bot is hunting (that is the only time there is anything worth dumping).
         # Written into debug/packets so the relay can pull it straight off the PC.
+        if cmd == 'memprobe':
+            # Read-only: reading client memory is not game input, so it must work while the
+            # bot is hunting. The relay branch uploads the dump; this only logs.
+            self._note('🧠 메모리 탐침 실행')
+            return {'probe': True}
         if cmd == 'dump':
             r = self.toggle_dump()
             self._note(f"🧪 패킷 덤프 {'ON' if r['dump'] else 'OFF'}" + (f" — {r['path']}" if r['path'] else ''))
@@ -659,7 +664,40 @@ class Api:
         s['window_count'] = len(wins)
         s['clients'] = self._client_states(wins) if len(wins) >= 2 else []
         s['gato'] = self.brain.gato_detected()
+        s['link'] = self._link_state()
+        s['scene'] = (self.vision.snapshot() or {}).get('scene', '')
+        s['scene_label'] = (self.vision.snapshot() or {}).get('scene_label', '')
         return s
+    def _link_state(self):
+        """Live tunnel state for the status panel.
+
+        The panel had no connection field at all, so a dead tunnel looked exactly like
+        a healthy idle macro - the operator only found out when the PC went silent.
+        This reports what the link itself knows: whether the public URL answers, how
+        many polls have failed in a row, and the link uptime.
+        """
+        out = {'up': False, 'fails': 0, 'url': '', 'tunnel': '', 'uptime_s': 0, 'running': False}
+        r = getattr(self, 'relay', None)
+        try:
+            if r is not None:
+                out['uptime_s'] = int(time.time() - r._t0)
+                out['fails'] = int(getattr(r, '_fails', 0) or 0)
+                out['running'] = True
+                # _fails resets on the first successful round trip, so up == "polled
+                # recently and the last poll worked".
+                out['up'] = out['fails'] == 0 and out['uptime_s'] > 0
+        except Exception as e:
+            out['err'] = f'{type(e).__name__}'
+        a = getattr(self, 'link', None)
+        try:
+            if a is not None:
+                out['url'] = getattr(a, 'url', '') or ''
+                out['tunnel'] = getattr(a, 'tunnel_kind', '') or ''
+                if out['url']:
+                    out['up'] = True
+        except Exception:
+            pass
+        return out
     def _client_states(self, wins):
         out = []
         main = self.engine.hwnd
@@ -992,6 +1030,37 @@ def _proc_exe(pid: int) -> str:
             return buf.value.lower() if ok else ''
         finally:
             ctypes.windll.kernel32.CloseHandle(h)
+def _instance_mutex():
+    """Create the single-instance mutex; (handle, already_running)."""
+    try:
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateMutexW(None, False, 'Global\\GatoSuperSingleInstance')
+        return h, (k32.GetLastError() == 183)   # ERROR_ALREADY_EXISTS
+    except Exception:
+        return 0, False
+def claim_single_instance(tries=12):
+    """Exactly one Gato may run. Kill a stale twin, then take the mutex.
+
+    The old design had NO guard at all: the installer's [Run] section launched the
+    app twice on every silent update, and the two processes then fought over
+    z-order - that is what pushed the foreground-steal failures into the hundreds
+    and made every click late. A second launch now closes the first and waits for
+    the mutex to be released by its exit, so the survivor is always the newest build.
+    """
+    h, busy = _instance_mutex()
+    if not busy:
+        return h
+    for _ in range(tries):
+        try:
+            ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            pass
+        close_previous_instances()
+        time.sleep(0.5)
+        h, busy = _instance_mutex()
+        if not busy:
+            return h
+    return h
 def close_previous_instances():
     my_pid = os.getpid()
     titles = {APP_TITLE, 'Prism'}
@@ -1015,6 +1084,31 @@ def close_previous_instances():
             for h in found:
                 win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
             time.sleep(0.6)
+def ensure_autostart():
+    """Register the exe in HKCU\\Run so a reboot never leaves the PC with no agent.
+
+    Nothing autostarted Gato: after a reboot the desktop icon sat there and the PC was
+    invisible until a human clicked it. Frozen builds only (a source checkout has no
+    stable exe path). The value is rewritten on every start, so an update that moves
+    the exe cannot leave a dead path behind and a login always starts the build that
+    is actually on disk.
+    """
+    if not getattr(sys, 'frozen', False):
+        return
+    try:
+        import winreg
+        exe = os.path.abspath(sys.executable)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\\Microsoft\\Windows\\CurrentVersion\\Run', 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+            try:
+                cur = winreg.QueryValueEx(k, 'GATO')[0]
+            except OSError:
+                cur = ''
+            if cur != f'"{exe}"':
+                winreg.SetValueEx(k, 'GATO', 0, winreg.REG_SZ, f'"{exe}"')
+    except Exception:
+        pass
+
+
 def install_error_hooks(api):
     import traceback
     def _report(kind, exc_type, exc, tb):
@@ -1076,7 +1170,8 @@ def start_f10_hotkey(api):
 def main():
     global _API
     ensure_admin()
-    close_previous_instances()
+    claim_single_instance()
+    ensure_autostart()
     api = Api()
     _API = api
     install_error_hooks(api)

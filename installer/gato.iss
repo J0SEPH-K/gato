@@ -36,6 +36,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; 1.0.20 shipped VERSION as version.dll beside the exe, which shadows the
 ; system version.dll on case-insensitive NTFS. Drop it on upgrade.
 Type: files; Name: "{app}\version.dll"
+; Wipe the app dir before copying. [Files] is ignoreversion, so a module a newer
+; build DROPPED (renamed, folded elsewhere, deleted) stayed on disk forever and the
+; frozen bootloader could still import it - that is how an "updated" PC keeps
+; behaving like the old build. Config lives in %LOCALAPPDATA%\GATO, not here.
+Type: filesandordirs; Name: "{app}\*"
 
 [Files]
 Source: "..\dist\Gato\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -45,15 +50,25 @@ Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check:
 Source: "npcap-installer.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsNpcap
 
 [Icons]
-Name: "{autoprograms}\GATO"; Filename: "{app}\Gato.exe"
-Name: "{autodesktop}\GATO"; Filename: "{app}\Gato.exe"; Tasks: desktopicon
+; The desktop icon is the operator's only launch path on the PC, so it is ALWAYS created -
+; as a task it was skippable (and skipped on silent updates, which then had no icon at all).
+; WorkingDir is pinned because the app resolves VERSION/assets relative to the exe directory.
+Name: "{autoprograms}\GATO"; Filename: "{app}\Gato.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\GATO"; Filename: "{app}\Gato.exe"; WorkingDir: "{app}"
 
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Microsoft Visual C++ runtime..."; Check: NeedsVCRedist; Flags: waituntilterminated
 Filename: "{tmp}\npcap-installer.exe"; Parameters: "/S /winpcap_mode=yes"; StatusMsg: "Npcap (packet capture driver)..."; Check: NeedsNpcap; Flags: waituntilterminated
-Filename: "{app}\Gato.exe"; Description: "{cm:LaunchProgram,GATO}"; Flags: nowait postinstall
-; A silent install (the updater) gets no postinstall page, so skipifsilent alone left the
-; machine with the new build on disk and nothing running. Relaunch unconditionally when silent.
+; EXACTLY ONE launch entry. The rule that must never be broken:
+;   * an interactive install must NOT launch (the desktop shortcut is how the operator
+;     starts it, so a launch here just races the shortcut and the shell);
+;   * a silent install (the in-app updater) MUST launch, or the machine is left with the
+;     new build on disk and nothing running.
+; `postinstall` alone did not hold that line: on /VERYSILENT it can still fire together
+; with the unconditional entry, and the two processes then fought over z-order until the
+; foreground-steal failures hit the hundreds. Making the first entry silent-only fixes it
+; by construction instead of by ordering luck.
+Filename: "{app}\Gato.exe"; Description: "{cm:LaunchProgram,GATO}"; Flags: nowait postinstall skipifsilent; Check: WizardSilent
 Filename: "{app}\Gato.exe"; Flags: nowait; Check: WizardSilent
 
 [Code]

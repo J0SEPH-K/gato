@@ -102,7 +102,8 @@ for _c in 'abcdefghijklmnopqrstuvwxyz':
 _EXT_KEYS = {'left', 'up', 'pageup', 'pagedown', 'insert', 'end', 'down', 'delete', 'home', 'right'}
 VK_HANGUL = 21
 class Hands:
-    FG_SETTLE = 0.3
+    FG_SETTLE = 0.12      # only after a real steal; was 0.3 and paid on every click
+    FG_FAIL_SETTLE = 0.05  # failed steal: the click still lands by absolute coords
     def __init__(self, hwnd_get=None, log=None):
         self._hwnd_get = hwnd_get or (lambda: 0)
         self._log = log or (lambda s: None)
@@ -307,21 +308,23 @@ class Hands:
         # click was preceded by a pointless (and slow) steal attempt.
         if not Hands._on_top(Hands._root(hwnd)):
             ok = self._try_foreground(hwnd)
-            self._fg_at = time.monotonic()
             if ok:
                 self._fg_fail = 0
                 self._log('전면 전환')
+                # FG_SETTLE is paid ONCE, right after a real steal, then the latch is
+                # cleared. It used to stay latched forever, so every later click paid up
+                # to 0.3 s of "settle" for a window that had been on top for minutes -
+                # that plus the fixed 0.15 s was ~0.45 s per click, which is the whole
+                # reason the macro looked like it was fighting in slow motion.
+                time.sleep(self.FG_SETTLE)
+                self._fg_at = 0.0
             else:
                 # Clicks use absolute screen coordinates and land on whatever is under the
                 # cursor, so a failed steal is not fatal - keep clicking instead of skipping.
                 self._fg_fail += 1
                 if self._fg_fail <= 3 or self._fg_fail % 100 == 0:
                     self._log(f'전면 전환 실패 {self._fg_fail}회 - 좌표 클릭으로 계속')
-            time.sleep(0.15)
-        if self._fg_at:
-            remain = self.FG_SETTLE - (time.monotonic() - self._fg_at)
-            if remain > 0:
-                time.sleep(remain)
+                time.sleep(self.FG_FAIL_SETTLE)
         return hwnd
     def focus_game(self) -> bool:
         try:

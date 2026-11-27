@@ -62,7 +62,13 @@
     display: flex; align-items: center; justify-content: space-between;
     flex: none; height: 42px; padding: 0 8px 0 16px;
     -webkit-app-region: drag;
+    cursor: default;
   }
+  /* The window is frameless with easy_drag=False, so pywebview only moves it from
+     elements matching DRAG_REGION_SELECTOR ('.pywebview-drag-region'). Without the
+     class on this bar the window could not be dragged at all - the CSS
+     -webkit-app-region alone does nothing in WebView2. */
+  .titlebar.pywebview-drag-region { cursor: move; }
   .titlebar .id { display: flex; align-items: center; gap: 9px; }
   .titlebar .mark {
     width: 20px; height: 20px; border-radius: 6px;
@@ -360,10 +366,14 @@
   .rz-s { left: 0; bottom: 0; width: 100%; height: 5px; cursor: ns-resize; }
   .rz-se { right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; }
   .rz-se:hover { background: linear-gradient(135deg, transparent 60%, var(--line) 60%, var(--line) 70%, transparent 70%); }
+
+  /* stale = the status bridge stopped answering; dim everything that could be lying */
+  body.stale #main { opacity: .55; transition: opacity .3s var(--ease); }
+  body.stale #pollState { color: var(--red); font-weight: 600; }
 </style>
 </head>
 <body>
-  <div class="titlebar">
+  <div class="titlebar pywebview-drag-region">
     <div class="id">
       <span class="mark">超</span>
       <h1>Gato_super</h1>
@@ -399,6 +409,7 @@
 
       <section id="chips">
         <span id="auth" class="chip"><span class="d"></span><span class="t">인증 확인 중…</span></span>
+        <span id="link" class="chip"><span class="d"></span><span class="t">연결 –</span></span>
         <span id="scene" class="chip"><span class="d"></span><span class="t">화면 –</span></span>
         <span id="conn" class="chip"><span class="d"></span><span class="t">정지</span></span>
         <span id="gato" class="chip"><span class="d"></span><span class="t">고트 –</span></span>
@@ -445,6 +456,7 @@
 
       <footer>
         <span id="winState">gersang.exe 탐색 전</span>
+        <span id="pollState"></span>
         <span id="adminState">권한 –</span>
       </footer>
     </section>
@@ -666,6 +678,18 @@
     setChip('conn', running && s.window_found, running ? (s.window_found ? '가동 중' : '창 대기') : '정지');
     setChip('gato', s.gato, s.gato ? '고트 연동' : '고트 없음');
 
+    // Remote link is its own chip now. It used to be folded into `conn`, so a dead
+    // tunnel and a stopped macro looked identical and the PC just went silent.
+    const lk = s.link || {};
+    const linkUp = !!lk.up;
+    const linkWarn = !linkUp && (!!lk.url || (lk.fails || 0) > 0);
+    setChip('link', linkUp, linkUp
+      ? ('연결됨' + (lk.tunnel ? ' · ' + lk.tunnel : ''))
+      : (lk.running ? (lk.fails ? '끊김 ' + lk.fails + '회' : '대기') : '없음'));
+    const lkEl = $('link');
+    lkEl.classList.toggle('warn', linkWarn);
+    lkEl.title = lk.url || (lk.running ? '터널 URL 없음 — 원격 접속 불가' : '링크 비활성');
+
     if (s.monster && curMonster !== null && s.monster !== curMonster) {
       curMonster = s.monster;
       refreshMainPortrait();
@@ -699,7 +723,9 @@
     if (s.battle_count != null) setBattles(s.battle_count);
 
     const v = s.vision || {};
-    setChip('scene', running && v.scene === 'main', '화면 ' + (running ? (v.scene_label || '–') : '–'));
+    // Scene is reported even while stopped - the engine still samples the window, and
+    // the old `running ?` gate printed a bare '화면 –' the whole time the macro was idle.
+    setChip('scene', v.scene === 'main', '화면 ' + (v.scene_label || '–'));
     const tr = $('triggers');
     const trigs = running ? (v.triggers || []) : [];
     let trHtml = '';
@@ -766,16 +792,43 @@
   }
   window.doLogin = doLogin;
 
-  async function poll() { try { setStatus(await pywebview.api.status()); } catch (e) {} }
+  // A dead status bridge (pywebview api gone after an update, an exception inside
+  // status()) used to freeze the panel at its last values with no indication at all.
+  // Both poll paths now share one failure counter, and from the third miss in a row
+  // the footer says so AND the whole panel goes into a visibly stale state, so a
+  // frozen number can never be mistaken for a live one.
+  let pollFails = 0;
+  function markPoll(ok, e) {
+    if (ok) {
+      pollFails = 0;
+      $('pollState').textContent = '';
+      document.body.classList.remove('stale');
+      return;
+    }
+    pollFails++;
+    if (pollFails >= 3) {
+      $('pollState').textContent = '상태 수신 실패 ' + pollFails + '회 — ' + (e && e.message ? e.message : '연결 오류');
+      document.body.classList.add('stale');
+    }
+  }
+  async function poll() {
+    try {
+      const s = await pywebview.api.status();
+      if (!s) throw new Error('empty status');
+      markPoll(true);
+      setStatus(s);
+    } catch (e) { markPoll(false, e); }
+  }
 
   async function pollAll() {
     try {
       const r = await pywebview.api.tick(lastSeq, lastChatSeq);
-      if (!r) return;
+      if (!r || !r.status) throw new Error('empty status');
+      markPoll(true);
       setStatus(r.status);
       renderEvents(r.events);
       renderChat(r.chat);
-    } catch (e) {}
+    } catch (e) { markPoll(false, e); }
   }
 
   let lastSeq = 0, logEmpty = true;
