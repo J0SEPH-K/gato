@@ -109,6 +109,17 @@ if os.path.isdir(_CV2DIR):
 
 _SP = os.path.join(sys.prefix, 'Lib', 'site-packages')
 
+# torchvision registers its custom operators (torchvision::nms, ::roi_align, ...) in the C++
+# extension _C.pyd at import. If that extension is not in the frozen tree the registry stays empty
+# and every torchvision import dies with "operator torchvision::nms does not exist", which also
+# takes out ultralytics/YOLO. hook-torchvision does not fire reliably here, so collect the
+# extensions and any shipped runtime DLLs verbatim.
+for _pkg in ('torchvision',):
+    _d = os.path.join(_SP, _pkg)
+    if os.path.isdir(_d):
+        binaries += [(os.path.join(_d, _f), _pkg)
+                     for _f in os.listdir(_d) if _f.endswith(('.pyd', '.dll'))]
+
 # Wheels ship their private runtime DLLs in sibling `<pkg>.libs` directories (numpy.libs holds
 # the hashed msvcp140 build that numpy's .pyd links against). PyInstaller resolves those through
 # the DLL search path, which under Wine does not include them, so the build warns
