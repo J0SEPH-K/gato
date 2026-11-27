@@ -48,9 +48,12 @@ jobs:
       - name: pywebview JS payload present (bridge would be dead without it)
         shell: pwsh
         run: |
-          foreach ($p in @('dist\Gato\webview\js\finish.js', 'dist\Gato\webview\js\api.js')) {
-            if (-not (Test-Path $p)) { throw "missing $p -- window.pywebview would never be injected" }
-            Write-Host ("ok " + $p + " (" + (Get-Item $p).Length + " bytes)")
+          # PyInstaller 6 puts datas under _internal, and that is also the exe's runtime
+          # _MEIPASS, so webview.get_js_dir() resolves there. Accept either layout.
+          foreach ($rel in @('webview\js\finish.js', 'webview\js\api.js')) {
+            $hit = @("dist\Gato\_internal\$rel", "dist\Gato\$rel") | Where-Object { Test-Path $_ }
+            if (-not $hit) { throw "missing $rel -- window.pywebview would never be injected" }
+            $hit | ForEach-Object { Write-Host ("ok " + $_ + " (" + (Get-Item $_).Length + " bytes)") }
           }
       - name: No readable source in the shipped tree
         if: always()
