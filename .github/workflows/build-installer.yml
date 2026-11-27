@@ -45,6 +45,13 @@ jobs:
           .\build_windows.ps1
           if (-not (Test-Path 'dist-installer\GatoSetup.exe')) { throw 'GatoSetup.exe missing' }
           Get-FileHash 'dist-installer\GatoSetup.exe' -Algorithm SHA256 | Format-List
+      - name: pywebview JS payload present (bridge would be dead without it)
+        shell: pwsh
+        run: |
+          foreach ($p in @('dist\Gato\webview\js\finish.js', 'dist\Gato\webview\js\api.js')) {
+            if (-not (Test-Path $p)) { throw "missing $p -- window.pywebview would never be injected" }
+            Write-Host ("ok " + $p + " (" + (Get-Item $p).Length + " bytes)")
+          }
       - name: No readable source in the shipped tree
         if: always()
         shell: pwsh

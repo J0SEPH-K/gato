@@ -195,6 +195,21 @@ datas = [
     ('VERSION', 'res'),
 ] + collect_data_files('ultralytics')
 
+# pywebview's JS payload. inject_pywebview() reads webview/js/{api,customize,state,finish}.js off
+# disk at runtime and raises FileNotFoundError if get_js_dir() cannot find the directory -- inside a
+# .NET NavigationCompleted handler, where pythonnet swallows it. The page still renders, but
+# window.pywebview is never created: no pywebviewready, so no onclick bindings, and every poll
+# against an undefined pywebview.api throws. Result: a painted window that ignores every click.
+# Nothing imports these files, so PyInstaller only ships them if named here.
+_WVJS = os.path.join(_SP, 'webview', 'js')
+if not os.path.isdir(_WVJS):
+    raise SystemExit('webview/js missing from site-packages -- pywebview cannot inject its bridge')
+for _r, _dirs, _files in os.walk(_WVJS):
+    _rel = os.path.relpath(_r, _WVJS)
+    _dest = 'webview/js' if _rel == '.' else os.path.join('webview/js', _rel)
+    for _f in _files:
+        datas.append((os.path.join(_r, _f), _dest))
+
 # pkg_resources' runtime hook imports jaraco.text, which reads a data file at import time
 # ("Lorem ipsum.txt"). setuptools vendors jaraco under setuptools/_vendor, and PyInstaller's
 # hook for it does not collect that .txt, so the frozen exe dies in the pkg_resources rthook
