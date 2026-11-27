@@ -146,7 +146,14 @@ def install(api):
                 log(f'실패 {type(e).__name__}: {e}')
             # A raised server floor is the one case where the next check cannot wait hours:
             # the bot refuses to start until the build is replaced, so poll fast and land it.
-            time.sleep(CHECK_FAST_SEC if api.auth.must_update() else CHECK_EVERY_SEC)
+            # must_update() can flip *while* we sleep (the floor is raised from the server), so
+            # sleep in slices and re-read it — a flat 6 h sleep ignored the floor for hours.
+            nap = CHECK_FAST_SEC if api.auth.must_update() else CHECK_EVERY_SEC
+            while nap > 0:
+                time.sleep(min(15.0, nap))
+                nap -= 15.0
+                if api.auth.must_update() and nap > CHECK_FAST_SEC:
+                    nap = CHECK_FAST_SEC
 
     t = threading.Thread(target=_loop, daemon=True)
     t.start()
