@@ -528,16 +528,24 @@ class Brain:
             if self._prev_main is not None:
                 sim = vis.scene_similarity(self._prev_main, field)
                 if sim < vis.SCENE_SIM_THRESH:
-                    stop = not self.ignore_teleport
-                    msg = f'⚠ 배경 급변 (유사도 {sim:.2f}) — 맵 이동/영자 소환 의심' + ('' if stop else ' (이동 잦은 몹 — 정지 안 함)')
+                    # Post-battle returns routinely land at sim ~0.3 (camera moved, mobs gone), so
+                    # the soft threshold only logs/notifies. A stop needs a hard-floor reading on
+                    # two consecutive checks against the SAME baseline (the baseline is held while a hard
+                    # reading is pending; a map move / GM summon stays different, a transient does not).
+                    hard = sim < vis.SCENE_STOP_SIM
+                    self._scene_low_n = (getattr(self, '_scene_low_n', 0) + 1) if hard else 0
+                    stop = (not self.ignore_teleport) and self._scene_low_n >= 2
+                    msg = f'⚠ 배경 급변 (유사도 {sim:.2f}) — 맵 이동/영자 소환 의심' + ('' if not self.ignore_teleport else ' (이동 잦은 몹 — 정지 안 함)')
                     self._log(msg)
                     self._notify_img(msg, frame)
                     if stop and self._shutdown_at is None:
                             self._shutdown_at = time.time() + STOP_GRACE
                             self._stop_reason = '배경 급변 (맵 이동/영자 소환 의심)'
                 else:
+                    self._scene_low_n = 0
                     self._log(f'배경 유사도 {sim:.2f}')
-            self._prev_main = field
+            if getattr(self, '_scene_low_n', 0) == 0:
+                self._prev_main = field
     SUB_TRIGGERS = {'사망', '포만감 템 없음'}
     SUB_MAIN_WAIT = 120.0
     def _sub_hands_for(self, hwnd: int, tag: str) -> Hands:

@@ -190,6 +190,7 @@ def whisper_is_open(img: np.ndarray) -> bool:
     return all(abs(_px_sum(img, x, y, x + 1, y + 1) - e) <= WHISPER_FEAT_TOL for (x, y), e in zip(WHISPER_FEATS, WHISPER_FEAT_SUMS))
 
 SCENE_SIM_THRESH = 0.5
+SCENE_STOP_SIM = 0.15
 FIELD_H = 651
 
 def scene_similarity(a: np.ndarray, b: np.ndarray) -> float:
