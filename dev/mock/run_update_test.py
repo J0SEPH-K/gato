@@ -77,8 +77,9 @@ update.apply('/tmp/GatoSetup-x.exe', logs.append)
 check('apply spawns the script detached', spawned and spawned[0][0][:2] == ['cmd', '/c'], spawned)
 cmd = os.path.join(config.BASE_DIR, 'update', 'apply.cmd')
 body = open(cmd, encoding='utf-8').read()
-check('apply writes a detached install-then-relaunch script',
-      '/VERYSILENT' in body and '/tmp/GatoSetup-x.exe' in body and 'start ""' in body, body)
+# The installer's [Run] section owns the relaunch, so apply.cmd installs and stops there.
+check('apply writes a detached install-only script',
+      '/VERYSILENT' in body and '/tmp/GatoSetup-x.exe' in body and 'start ""' not in body, body)
 
 class Api:
     class vision:

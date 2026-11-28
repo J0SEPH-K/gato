@@ -93,16 +93,20 @@ def download(info, log=lambda m: None):
 
 
 def apply(installer, log=lambda m: None):
-    """Hand over to the installer from a detached .cmd so this process can exit cleanly."""
-    exe = os.path.abspath(sys.executable)
+    """Hand over to the installer from a detached .cmd so this process can exit cleanly.
+
+    The script installs and NOTHING else: the installer owns the relaunch. Its [Run]
+    section starts the app on a silent install, so an extra `start` here launched a
+    second instance a few seconds later and the two fought for z-order -- every click
+    then paid the full failed foreground-steal ladder, which reads as a slow macro.
+    Exactly one launcher per update: the installer.
+    """
     cmd = os.path.join(config.BASE_DIR, 'update', 'apply.cmd')
     os.makedirs(os.path.dirname(cmd), exist_ok=True)
     with open(cmd, 'w', encoding='utf-8') as f:
         f.write('@echo off\r\n')
         f.write('ping -n 3 127.0.0.1 >nul\r\n')
         f.write(f'"{installer}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS\r\n')
-        f.write('ping -n 3 127.0.0.1 >nul\r\n')
-        f.write(f'start "" "{exe}"\r\n')
         f.write('del "%~f0"\r\n')
     kwargs = {'close_fds': True}
     if os.name == 'nt':

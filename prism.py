@@ -20,6 +20,7 @@ import win32con
 import win32gui
 import win32process
 import config
+import single_instance
 APP_TITLE = 'Gato_super'
 from brain import Brain
 from capture import CaptureEngine, REF_H, REF_W, find_window, find_windows, grab_hwnd_region
@@ -1031,36 +1032,28 @@ def _proc_exe(pid: int) -> str:
         finally:
             ctypes.windll.kernel32.CloseHandle(h)
 def _instance_mutex():
-    """Create the single-instance mutex; (handle, already_running)."""
-    try:
-        k32 = ctypes.windll.kernel32
-        h = k32.CreateMutexW(None, False, 'Global\\GatoSuperSingleInstance')
-        return h, (k32.GetLastError() == 183)   # ERROR_ALREADY_EXISTS
-    except Exception:
-        return 0, False
-def claim_single_instance(tries=12):
-    """Exactly one Gato may run. Kill a stale twin, then take the mutex.
+    """(handle, already_running) for the single-instance mutex."""
+    h, busy, _closed = single_instance.acquire(tries=1, delay=0)
+    return h, busy
 
-    The old design had NO guard at all: the installer's [Run] section launched the
-    app twice on every silent update, and the two processes then fought over
-    z-order - that is what pushed the foreground-steal failures into the hundreds
-    and made every click late. A second launch now closes the first and waits for
-    the mutex to be released by its exit, so the survivor is always the newest build.
+
+def claim_single_instance(tries=12):
+    """Exactly one Gato may run. Close a stale twin, then take the mutex.
+
+    Nothing guarded this before: the silent-update path launched the app from both
+    ends (the updater script started the exe and the installer [Run] section did too),
+    so an update left two processes alive. Both attach to the game and fight over
+    z-order, so every click pays the full failed foreground-steal ladder and the macro
+    reads as slow. The newest build wins: a second instance asks the older twin to
+    close, waits for the mutex to be freed by its exit, and only then runs.
     """
-    h, busy = _instance_mutex()
-    if not busy:
-        return h
-    for _ in range(tries):
-        try:
-            ctypes.windll.kernel32.CloseHandle(h)
-        except Exception:
-            pass
-        close_previous_instances()
-        time.sleep(0.5)
-        h, busy = _instance_mutex()
-        if not busy:
-            return h
-    return h
+    h, busy, closed = single_instance.acquire(
+        tries=tries, delay=0.5, close_others=close_previous_instances)
+    if closed:
+        print('[gato] single-instance: closed %d older instance(s)' % closed)
+    return h, busy
+
+
 def close_previous_instances():
     my_pid = os.getpid()
     titles = {APP_TITLE, 'Prism'}
@@ -1170,7 +1163,11 @@ def start_f10_hotkey(api):
 def main():
     global _API
     ensure_admin()
-    claim_single_instance()
+    _h, busy = claim_single_instance()
+    if busy:
+        # A second instance would only fight the first for z-order; the first keeps
+        # running with the newest build on disk.
+        os._exit(0)
     ensure_autostart()
     api = Api()
     _API = api
