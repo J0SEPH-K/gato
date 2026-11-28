@@ -264,6 +264,8 @@ class Brain:
         self.solver_errors = {}
         self._solvers_loading = True
         self._jochul_at = 0.0
+        self._jochul_abstain_n = 0   # 연속 기권 횟수 (정답 라운드에서 리셋)
+        self._jochul_retry = False   # 기권 후 판이 그대로면 루프가 즉시 재진입
         self._jamun_at = 0.0
         self._solve_thread = None
         self._prev_main = None
@@ -1524,12 +1526,12 @@ class Brain:
             return True
     def _cap_native(self):
         return self._grab_main(normalize=False)
-    def _start_jochul(self):
+    def _start_jochul(self, popup_before=None):
         self._battle_running = True
         self._jochul_at = time.time()
         def _worker():
             try:
-                self._handle_jochul()
+                self._handle_jochul(popup_before=popup_before)
             except Exception as e:
                 self._log(f'조철 오류: {e}')
             finally:
@@ -1554,7 +1556,7 @@ class Brain:
             self._notify(f'⚠️ {label} 감지했으나 해독 모델 미로드 — 정지')
             self._stop_now(f'{label} 솔버 미준비')
             return False
-    def _handle_jochul(self, hands=None, hwnd=0, tag='', park=True):
+    def _handle_jochul(self, hands=None, hwnd=0, tag='', park=True, popup_before=None):
         """Solve one 조철 round; in the background also record EVERY frame of the round with labels
         (start slot, our answer, where the 마패 reappears) into debug/jochul_rounds for offline tuning."""
         rec = None
@@ -1566,7 +1568,7 @@ class Brain:
         except Exception:
             rec = None
         try:
-            return self._handle_jochul_inner(hands, hwnd, tag, park)
+            return self._handle_jochul_inner(hands, hwnd, tag, park, popup_before=popup_before)
         finally:
             if self.pkt is not None:
                 self.pkt.end()
@@ -1579,10 +1581,50 @@ class Brain:
                         self._log(f'조철 라운드 녹화 저장 — {len(rec.frames)}프레임 ({rec.mode}) {d}')
                 except Exception:
                     pass
-    def _handle_jochul_inner(self, hands=None, hwnd=0, tag='', park=True):
+    JOCHUL_ABSTAIN_MAX = 3
+
+    def _abstain_jochul(self, p, meta, first, cap, popup_before=None):
+        """No answer this round: never click a guess. Let the board close itself, and hand the loop the
+        truth about a board still on screen via `self._jochul_retry`, which re-enters from the trigger
+        pixel instead of waiting out the 5 s guard. Stop only after JOCHUL_ABSTAIN_MAX consecutive
+        unanswerable rounds -- `_stop_bot` (not `_stop_now`) so the loop's own `_shutdown_at` check
+        ends the hunt from a worker thread."""
+        self._jochul_abstain_n += 1
+        n = self._jochul_abstain_n
+        reason = meta.get('reason') or f'정착 판독·추적·패킷 모두 실패 (1번={first})'
+        meta['abstained'] = True
+        meta['abstain_n'] = n
+        # `still` is the real question -- is the board on screen RIGHT NOW. popup_before only vetoes:
+        # a board that was already gone before the solve cannot come back by re-entering.
+        if popup_before is False:
+            still = False
+        else:
+            f = cap()
+            still = bool(f is not None and vis._px_sum(f, 513, 43, 514, 44) == 151
+                         and vis._px_sum(f, 514, 43, 515, 44) == 133)
+        if n >= self.JOCHUL_ABSTAIN_MAX:
+            self._jochul_abstain_n = 0
+            self._jochul_retry = False
+            self._log(f'{p}조철 기권 — {reason} (연속 {n}/{self.JOCHUL_ABSTAIN_MAX}회 → 정지)')
+            self._stop_bot(f'조철 {n}회 연속 기권 — {reason}')
+            return
+        self._jochul_retry = still
+        self._log(f'{p}조철 기권 — {reason} (연속 {n}/{self.JOCHUL_ABSTAIN_MAX}회, 판 {"남음 → 재진입" if still else "닫힘 → 사냥 재개"})')
+        if still:
+            time.sleep(1.2)
+
+    def _handle_jochul_inner(self, hands=None, hwnd=0, tag='', park=True, popup_before=None):
+        """`popup_before` is the caller's pre-solve snapshot of whether the 조철 board was on screen
+        (None when the caller did not sample it). An ABSTAIN uses it as a veto before asking the loop
+        to re-enter: a board that was already gone before the solve cannot come back by re-entering."""
         hands = hands or self.hands
         cap = (lambda: grab_hwnd(hwnd)) if hwnd else self._cap
         p = f'[{tag}] ' if tag else ''
+
+        def _popup_present():
+            f = cap()
+            return f is not None and vis._px_sum(f, 513, 43, 514, 44) == 151 and (vis._px_sum(f, 514, 43, 515, 44) == 133)
+
         if not self._await_solver(self.jochul_solver, f'{p}조철'):
             return
         else:
@@ -1630,7 +1672,7 @@ class Brain:
                         cv2.imwrite(os.path.join(config.JOCHUL_FAIL_DIR, time.strftime('first_tile_miss_%H%M%S.png')), frame)
                     except Exception:
                         pass
-                    self._stop_now(f'{p}조철 첫 마패 인식 실패')
+                    self._abstain_jochul(p, {'first': None, 'reason': '첫 마패 인식 실패'}, None, cap, popup_before=popup_before)
                     return
                 else:
                     self._log(f'{p}조철 첫 마패: {first}번')
@@ -1778,14 +1820,13 @@ class Brain:
                         meta['passed'] = None
                         if dump:
                             self._write_meta(dump, meta)
-                        self._stop_now(f'{p}조철 불확실 — 정착 판독과 추적 모두 실패 (스왑 해독값={old_answer})')
+                        self._abstain_jochul(p, meta, first, cap, popup_before=popup_before)
                         return
+                    self._jochul_abstain_n = 0   # 정답 라운드 — 연속 기권 카운터 리셋
+                    self._jochul_retry = False
                     meta['clicked'] = answer
                     x = jochul.CLICK_X[answer]
                     time.sleep(0.25)
-                    def _popup_present():
-                        f = cap()
-                        return f is not None and vis._px_sum(f, 513, 43, 514, 44) == 151 and (vis._px_sum(f, 514, 43, 515, 44) == 133)
                     def _fg_info():
                         fg = win32gui.GetForegroundWindow()
                         try:
@@ -2257,10 +2298,20 @@ class Brain:
                             if not self._battle_running and self._shutdown_at is None:
                                     new_fired = fired - self._prev_fired
                                     now = time.time()
-                                    if '조철 출현' in new_fired:
-                                        self._record_appear('조철')
-                                        if now - self._jochul_at > 5.0:
-                                            self._start_jochul()
+                                    # 조철/자방문: a board that stayed up after an abstain is retried at
+                                    # once from its trigger pixel; otherwise the 5 s guard still applies.
+                                    # `_jochul_retry` is set by the abstain path and cleared on any
+                                    # answered round, so a still-open board never becomes a no-battle
+                                    # restart loop.
+                                    if '조철 출현' in fired:
+                                        if '조철 출현' in new_fired:
+                                            self._record_appear('조철')
+                                        _retry = self._jochul_retry
+                                        if _retry:
+                                            self._jochul_retry = False
+                                        if ('조철 출현' in new_fired or _retry) and (_retry or now - self._jochul_at > 5.0):
+                                            _snap = vis._px_sum(img, 513, 43, 514, 44) == 151 and vis._px_sum(img, 514, 43, 515, 44) == 133
+                                            self._start_jochul(popup_before=_snap)
                                     else:
                                         if '자방문 출현' in new_fired:
                                             self._record_appear('자방문')

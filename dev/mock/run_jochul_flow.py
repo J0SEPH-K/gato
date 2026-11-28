@@ -63,8 +63,14 @@ def make(tile_after, marker_slot=None, track_answer=4, reveal_slot=None):
         return frames, times
 
     jochul.record_all = _fake_record_all
+    # 조철 board "still on screen" flag: the abstain path reads the same two trigger pixels the live
+    # loop reads, so the fake frame has to carry them exactly (sum 151 / 133 at 513,43 and 514,43).
+    popup = {'on': False}
     def cap():
         f = np.full((768, 1024, 3), (40, 100, 40), np.uint8)    # plain grass: no accidental pixel patterns
+        if popup['on']:
+            f[43, 513] = (51, 50, 50)
+            f[43, 514] = (45, 44, 44)
         if marker_slot and int((time.time() - t0) * 25) % 5 < 2:      # medallion bobs: visible ~40% of frames
             _stamp(f, marker_slot, jochul.REGION[0], jochul.REGION[1])
         _clicks = [h[1] for h in hands.log if h[0] == 'click']
@@ -82,7 +88,7 @@ def make(tile_after, marker_slot=None, track_answer=4, reveal_slot=None):
         return f
     b._cap = cap
     brain.grab_hwnd = lambda h, normalize=True: cap()    # every grab (solver + recorder) goes through the fake
-    return b, hands, notes, parks, solved
+    return b, hands, notes, parks, solved, popup
 
 fails = []
 def check(name, cond, extra=''):
@@ -99,7 +105,7 @@ config.BASE_DIR = tempfile.mkdtemp(prefix='gato_rounds_')
 # every test case, not just case 3, so this can never contaminate real evidence again.
 config.JOCHUL_FAIL_DIR = os.path.join(tempfile.mkdtemp(prefix='gato_jochul_fail_'), 'jochul_fail')
 # 1) tile visible at once
-b, hands, notes, parks, solved = make(0.0)
+b, hands, notes, parks, solved, popup = make(0.0)
 t = time.time(); b._handle_jochul(); el = time.time() - t
 clicks = [h for h in hands.log if h[0] == 'click']
 check('tile visible: first tile found', any('첫 마패: 2번' in n for n in notes), notes[:4])
@@ -117,36 +123,66 @@ if dirs:
     check('frame files readable', len([f for f in os.listdir(os.path.join(rd, dirs[0])) if f.endswith('.jpg')]) == meta['frames'])
 
 # 2) marker appears 0.7 s late -> retry finds it, no stop
-b, hands, notes, parks, solved = make(0.5 + 0.7)
+b, hands, notes, parks, solved, popup = make(0.5 + 0.7)
 b._handle_jochul()
 check('late marker (0.7 s) still solved, not stopped', b.running and any('첫 마패' in n for n in notes) and not any('인식 실패' in n for n in notes), notes[:5])
 
 # 2b) other skin: no navy-hair pattern at all, only the gold medallion over slot 3
-b, hands, notes, parks, solved = make(999, marker_slot=3)
+b, hands, notes, parks, solved, popup = make(999, marker_slot=3)
 b._handle_jochul()
 check('medallion only (other skin): first slot 3 found', any('첫 마패: 3번' in n for n in notes) and b.running, notes[:6])
 
-# 3) marker never appears -> stops, saves frame
-b, hands, notes, parks, solved = make(999)
+# 3) first tile never appears -> ABSTAIN (board left alone, hunting resumes), frame saved
+b, hands, notes, parks, solved, popup = make(999)
 b._handle_jochul()
-check('no marker: macro stops with a clear reason', (not b.running) and any('첫 마패 인식 실패' in n for n in notes), notes[:5])
-check('no marker: frame saved for diagnosis', os.path.isdir(config.JOCHUL_FAIL_DIR) and any(f.startswith('first_tile_miss') for f in os.listdir(config.JOCHUL_FAIL_DIR)))
+check('first tile miss: abstains instead of stopping', b.running and any('기권' in n for n in notes) and b._shutdown_at is None, notes[:5])
+check('first tile miss: frame saved for diagnosis', os.path.isdir(config.JOCHUL_FAIL_DIR) and any(f.startswith('first_tile_miss') for f in os.listdir(config.JOCHUL_FAIL_DIR)))
 
-# 4) tracker uncertain (None) -> stop and ask for a human, NEVER click a guess (2026-11-22: the
-# swap-decoder fallback this used to click measured 43% real-world accuracy on 7 logged failures -
-# a wrong click is the expensive failure mode, so uncertain must mean "stop", not "guess anyway").
-b, hands, notes, parks, solved = make(0.0, track_answer=None)
+# 4) tracker uncertain (None) -> abstain, NEVER click a guess (2026-11-22: the swap-decoder
+# fallback this used to click measured 43% real-world accuracy on 7 logged failures - a wrong click
+# is the expensive failure mode). The board is gone on this fake, so the loop must NOT ask for a
+# re-entry and hunting must resume on the first abstain.
+b, hands, notes, parks, solved, popup = make(0.0, track_answer=None)
 b._handle_jochul()
 clicks = [h for h in hands.log if h[0] == 'click']
-check('uncertain tracker: macro stops instead of guessing', (not b.running) and any('불확실' in n for n in notes), notes[:6])
+check('uncertain tracker: abstains instead of stopping', b.running and any('기권' in n for n in notes), notes[:6])
 check('uncertain tracker: NO click was made', len(clicks) == 0, clicks)
+check('uncertain tracker: no retry when the board is already gone', getattr(b, '_jochul_retry', None) is False, getattr(b, '_jochul_retry', '<missing>'))
+check('uncertain tracker: counter went to 1', getattr(b, '_jochul_abstain_n', None) == 1, getattr(b, '_jochul_abstain_n', '<missing>'))
+
+# 4b) abstain with the board STILL UP -> retry flag set so the loop re-enters instead of idling
+b, hands, notes, parks, solved, popup = make(0.0, track_answer=None)
+popup['on'] = True
+b._handle_jochul()
+check('abstain with board still up: retry requested', getattr(b, '_jochul_retry', None) is True and b.running, (getattr(b, '_jochul_retry', '<missing>'), notes[:4]))
+
+# 4c) 3 abstains in a row -> stop with the reason in _stop_reason; counter resets afterwards
+b, hands, notes, parks, solved, popup = make(0.0, track_answer=None)
+for _ in range(3):
+    b._handle_jochul()
+# _stop_bot arms the 8 s grace window; the loop's own _shutdown_at check ends the hunt.
+check('three abstains in a row: stop armed', b._shutdown_at is not None and b.running, (b.running, b._shutdown_at))
+check('three abstains in a row: reason names 조철 + the count', '조철 3회 연속 기권' in (b._stop_reason or ''), b._stop_reason)
+check('three abstains in a row: counter reset for the next run', getattr(b, '_jochul_abstain_n', None) == 0, getattr(b, '_jochul_abstain_n', '<missing>'))
+
+# 4d) an ANSWERED round resets the counter between abstains
+b, hands, notes, parks, solved, popup = make(0.0, track_answer=None)
+b._handle_jochul()
+b._handle_jochul()
+check('two abstains -> counter 2', getattr(b, '_jochul_abstain_n', None) == 2, getattr(b, '_jochul_abstain_n', '<missing>'))
+b2, h2, n2, p2, s2, pop2 = make(0.0)
+b._jochul_abstain_n = 2
+b._jochul_solver = b2.jochul_solver
+b._cap = b2._cap
+b._handle_jochul()
+check('answered round resets the counter to 0', getattr(b, '_jochul_abstain_n', None) == 0 and b.running, (getattr(b, '_jochul_abstain_n', '<missing>'), b.running))
 
 # 5) post-click reveal read must survive the medallion's blink gap. One cap() at a fixed 0.9 s
 # missed the reveal on two real field rounds (reveal_conf 0.8895/0.892 = the no-marker score);
 # replaying the old read over every start offset of a real recorded reveal missed 111/286 times.
 # The 1.1 s burst keeps the best-scoring frame, so it records the slot the game revealed (2 here,
 # deliberately not the clicked 4) and sends no extra click.
-b, hands, notes, parks, solved = make(0.0, reveal_slot=2)
+b, hands, notes, parks, solved, popup = make(0.0, reveal_slot=2)
 b._handle_jochul()
 clicks = [h for h in hands.log if h[0] == 'click']
 check('reveal burst: reveal_slot read through the blink gap', b._jochul_meta.get('reveal_slot') == 2,
