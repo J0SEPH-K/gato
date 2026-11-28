@@ -439,7 +439,9 @@ async function relayAdmin(req, env, url) {
     const o = await readBody(req, 8192);
     if (!o) return json({ ok: false, reason: 'bad_request' }, 400);
     const cmd = String(o.cmd || '');
-    if (!['log', 'shot', 'ls', 'pull', 'stop', 'dump', 'start', 'update', 'relaunch', 'restart'].includes(cmd)) return json({ ok: false, reason: 'bad_cmd' }, 400);
+    // Keep this list in step with relay.py run_job(). `dump`/`self_update` are implemented on the
+    // PC but were missing here (bad_cmd). memprobe/exe deliberately NOT listed (charter gate 1).
+    if (!['log', 'shot', 'ls', 'pull', 'stop', 'dump', 'self_update', 'start', 'update', 'relaunch', 'restart'].includes(cmd)) return json({ ok: false, reason: 'bad_cmd' }, 400);
     let machine = String(o.machine || '');
     if (!machine && o.pc) {
       const a = await env.DB.prepare('SELECT machine FROM agents WHERE pc = ? ORDER BY seen DESC LIMIT 1').bind(String(o.pc)).first();
