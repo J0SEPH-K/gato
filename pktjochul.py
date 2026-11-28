@@ -174,6 +174,27 @@ class PktJochul:
                     variety = len(set(pairs))
                     if variety < 3:
                         continue
+                    # Byte "a" being in 1..5 is not proof it is a slot field — a fixed
+                    # subtype/tag byte that happens to sit in that range reads as a
+                    # constant "slot" on every frame. Checked against two independent
+                    # field captures (2026-11-28, opcode 0xee00 off=4,7): offset 4 was
+                    # the literal value 3 on all 155 combined swaps across BOTH a round
+                    # that passed and one that didn't — the "varying" end (offset 7) was
+                    # real, offset 4 never was. A real swap column must vary on both ends
+                    # independently; requiring that here would abstain on both of those
+                    # rounds, including the passed one, which is the correct call: a
+                    # confident answer built on a constant byte is a coincidence, not a
+                    # decode, even on the one round it happened to agree with the result.
+                    # Replay of all three captured real rounds (BXBO-5): every surviving
+                    # 0xee00 column had one side pinned to a single value - off 4 is the
+                    # subtype (3 on 223/223 frames) and off 7 is the record count (frame
+                    # length grows ~6 B per unit of it), so (4,7) and (7,10) were never swap
+                    # data. A genuine column of only 3-4 swaps cannot always show 3 values on
+                    # each side (e.g. (4,5),(1,4),(2,5)), so short columns need 2; the
+                    # constant-side columns above have 1 and stay rejected either way.
+                    need = 3 if len(pairs) >= 5 else 2
+                    if len({p[0] for p in pairs}) < need or len({p[1] for p in pairs}) < need:
+                        continue
                     cand.append(((variety, len(pairs), a, b), op, a, b, pairs, len(group)))
         if not cand:
             return None, 'no frame column carries a varying slot pair'

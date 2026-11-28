@@ -7,7 +7,7 @@ import cv2
 import mock_loop as m
 import brain, jochul, config
 
-def make(tile_after, marker_slot=None, track_answer=4):
+def make(tile_after, marker_slot=None, track_answer=4, reveal_slot=None):
     notes, t0 = [], time.time()
     hands = m.FakeHands()
     parks = []
@@ -67,6 +67,13 @@ def make(tile_after, marker_slot=None, track_answer=4):
         f = np.full((768, 1024, 3), (40, 100, 40), np.uint8)    # plain grass: no accidental pixel patterns
         if marker_slot and int((time.time() - t0) * 25) % 5 < 2:      # medallion bobs: visible ~40% of frames
             _stamp(f, marker_slot, jochul.REGION[0], jochul.REGION[1])
+        _clicks = [h[1] for h in hands.log if h[0] == 'click']
+        if reveal_slot and _clicks:
+            # Post-click reveal cadence measured on real round_20261126_232228 (43.7 fps): the
+            # medallion blinks with a 1.06 s period, 0.64 s visible / 0.42 s gone. Phase is pinned
+            # to the last click so t=0.9 s (the old single cap() read) lands inside a gap.
+            if ((time.time() - _clicks[-1]) % 1.06) < 0.64:
+                _stamp(f, reveal_slot, jochul.REGION[0], jochul.REGION[1])
         if tile_after < 900 and time.time() - t0 >= tile_after:
             x, y = 130, 100          # inside REGION; pattern the real first tile has
             ox, oy = jochul.REGION[0], jochul.REGION[1]
@@ -133,6 +140,18 @@ b._handle_jochul()
 clicks = [h for h in hands.log if h[0] == 'click']
 check('uncertain tracker: macro stops instead of guessing', (not b.running) and any('불확실' in n for n in notes), notes[:6])
 check('uncertain tracker: NO click was made', len(clicks) == 0, clicks)
+
+# 5) post-click reveal read must survive the medallion's blink gap. One cap() at a fixed 0.9 s
+# missed the reveal on two real field rounds (reveal_conf 0.8895/0.892 = the no-marker score);
+# replaying the old read over every start offset of a real recorded reveal missed 111/286 times.
+# The 1.1 s burst keeps the best-scoring frame, so it records the slot the game revealed (2 here,
+# deliberately not the clicked 4) and sends no extra click.
+b, hands, notes, parks, solved = make(0.0, reveal_slot=2)
+b._handle_jochul()
+clicks = [h for h in hands.log if h[0] == 'click']
+check('reveal burst: reveal_slot read through the blink gap', b._jochul_meta.get('reveal_slot') == 2,
+      {k: b._jochul_meta.get(k) for k in ('reveal_slot', 'reveal_conf', 'clicked')})
+check('reveal burst: no extra click from the reveal read', len(clicks) == 2, clicks)
 
 print('FAILED: %s' % fails if fails else 'all passed')
 sys.exit(1 if fails else 0)

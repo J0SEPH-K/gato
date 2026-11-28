@@ -124,6 +124,28 @@ feed(rec, stream([(4, 5), (1, 4), (2, 5)]))
 chk('begin() starts a clean round',
     rec.solve(1)[0] == pktjochul.PktJochul._replay([(4, 5), (1, 4), (2, 5)]).index(1) + 1)
 
+# 11. the real 0xee00 position-broadcast shape must abstain, not answer.
+# Layout read off three captured real rounds (BXBO-5 replay): `len|op|03 00 00 count|records`,
+# each record `id(2) 02 y x(2) 00`. Offset 4 is the subtype (3 on every frame) and offset 7 the
+# record count, so (4,7) reads as a "swap pair" (3,count) on most frames and (7,10) as (count,2).
+# The pre-BXBO-5 gate (pair-tuple variety only) answered from exactly these columns on two real
+# rounds; a column with one side pinned to a single value is not swap data.
+import random  # noqa: E402
+rng = random.Random(7)
+ee = b''
+for count in [1, 2, 1, 4, 1, 2, 2, 1, 4, 1, 2, 1, 1, 2, 4, 1, 3, 1, 2, 1] * 3:
+    body = bytes([3, 0, 0, count])
+    for _ in range(count):
+        body += bytes([rng.randrange(256), rng.randrange(256), 2, rng.randrange(256),
+                       rng.randrange(256), rng.randrange(1, 3), 0])
+    ee += frame(0xee00, body)
+rec = pktjochul.PktJochul()
+rec.begin()
+feed(rec, ee)
+ans11, info11 = rec.solve(1)
+chk('abstains on the real 0xee00 subtype/count shape', ans11 is None and 'no frame column' in info11,
+    f'ans={ans11} {info11}')
+
 print()
 if fails:
     print(f'{len(fails)} FAILED: ' + ', '.join(fails))

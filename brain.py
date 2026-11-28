@@ -1843,14 +1843,31 @@ class Brain:
                         _ok2 = hands.click(x, jochul.CLICK_Y, down_ms=0.15, wait=True)
                         self._log(f'{p}조철 진단 click2={_ok2}')
                         self._log(f'{p}조철 정답 더블클릭 ({answer}번 x={x}) — 시각 판독')
-                    time.sleep(0.9)
+                    time.sleep(0.5)
                     try:
                         # after the click the clicked character turns green and the 마패 shows over it for ~1.7 s,
-                        # then the board closes (real round, 44 fps). Read it NOW, not 3 s later. Recorded as evidence
-                        # only: the game closes the board for right and wrong clicks alike, so this is NOT a pass signal.
-                        _rf = cap()
+                        # then the board closes (real round, 44 fps). Recorded as evidence only: the game closes
+                        # the board for right and wrong clicks alike, so this is NOT a pass signal.
+                        #
+                        # BUG (found 2026-11-28 from two real field rounds): a single cap() at a fixed t=0.9s
+                        # came back with no marker both times -- reveal_conf 0.8895 and 0.892, i.e. the exact
+                        # no-marker score (0.8894 on recorded gap frames), not a near-miss. Cause, measured on
+                        # recorded round_20261126_232228: after the click the medallion BLINKS with a 1.06 s
+                        # period (0.64 s visible / 0.42 s gone), so one snapshot lands in a gap ~40% of the time
+                        # (111/286 start offsets on that recording). Sample a burst longer than one blink period
+                        # and keep the best-scoring frame (286/286 on the same recording).
+                        _rf, _best_sc, _best_slot = None, -1.0, None
+                        _t_rev0 = time.time()
+                        while time.time() - _t_rev0 < 1.1:
+                            _cf = cap()
+                            if _cf is not None:
+                                _csc = jochul.marker_scores(jochul.crop_region(_cf))
+                                _cbest = max(_csc.items(), key=lambda kv: kv[1])
+                                if _cbest[1] > _best_sc:
+                                    _rf, _best_sc, _best_slot = _cf, _cbest[1], jochul.find_marker_slot(jochul.crop_region(_cf))
+                            time.sleep(0.08)
                         if _rf is not None:
-                            meta['reveal_slot'] = jochul.find_marker_slot(jochul.crop_region(_rf))
+                            meta['reveal_slot'] = _best_slot
                             meta['start_slot'] = first
                             try:
                                 _sc = jochul.marker_scores(jochul.crop_region(_rf))
