@@ -24,6 +24,8 @@ const enc = new TextEncoder();
 
 // ---------------------------------------------------------------- helpers
 
+const CMD_HOLD_MS = 25000;
+
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -484,6 +486,20 @@ async function relayAdmin(req, env, url) {
   return null;
 }
 
+// Remote-input long-poll. No command store exists (the feature never shipped), so after auth we
+// hold the request well under the client's 40 s timeout, then answer empty. A held request costs
+// no CPU time; it turns a 0.5 s hot loop on a 404 into ~2.4 req/min per PC.
+async function handleCmd(req, env) {
+  const o = await readBody(req, 4096);
+  if (!o) return json({ ok: false, reason: 'bad_request' }, 400);
+  const id = String(o.id || '').trim().slice(0, 64), token = String(o.token || '').trim().slice(0, 128);
+  if (!id || !token) return json({ ok: false, reason: 'forbidden' }, 403);
+  const b = await env.DB.prepare('SELECT 1 FROM binds WHERE id = ? AND token = ?').bind(id, token).first();
+  if (!b) return json({ ok: false, reason: 'forbidden' }, 403);
+  await new Promise((r) => setTimeout(r, CMD_HOLD_MS));
+  return json({ ok: true, cmds: [] });
+}
+
 // ---------------------------------------------------------------- entry
 
 export default {
@@ -506,6 +522,8 @@ export default {
       if (p === '/agent/poll' && req.method === 'POST') return await handlePoll(req, env);
       if (p === '/agent/up' && req.method === 'POST') return await handleUp(req, env, url);
       if (p === '/agent/done' && req.method === 'POST') return await handleDone(req, env);
+      if (p === '/cmd' && req.method === 'POST') return await handleCmd(req, env);
+      if (p === '/battle' && req.method === 'POST') return json({ ok: true });
       if (p === '/debug/jochul' && req.method === 'POST') return await handleDebugUpload(req, env, url);
       if (p === '/health') return json({ ok: true, t: now() });
       return json({ ok: false, reason: 'not_found' }, 404);
